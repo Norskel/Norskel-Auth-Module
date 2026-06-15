@@ -49,7 +49,7 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Set Maven version
         run: mvn versions:set -DnewVersion=${{ steps.version.outputs.VERSION }} --batch-mode --no-transfer-progress
