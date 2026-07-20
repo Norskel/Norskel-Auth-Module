@@ -13,6 +13,7 @@ import net.norskel.auth.module.runtime.entities.ApiKeyEntity;
 import net.norskel.auth.module.runtime.spi.ApiKeyService;
 import net.norskel.auth.module.runtime.spi.UserService;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
@@ -50,17 +51,17 @@ public class ApiKeyResource {
         if (req.name() == null || req.name().isBlank()) {
             throw new BadRequestException("name is required");
         }
-        if (req.lifetimeDays() <= 0) {
+        if (req.lifetimeDays() != null && req.lifetimeDays() <= 0) {
             throw new BadRequestException("lifetimeDays must be > 0");
         }
-        UUID userId = currentUserId();
-        String token = apiKeyService.create(userId, req.name(), req.lifetimeDays());
-        ApiKeyEntity created = apiKeyService.listByUser(userId).stream()
-                .filter(k -> req.name().equals(k.getName()) && !Boolean.TRUE.equals(k.getRevoked()))
-                .max((a, b) -> a.getCreatedAt().compareTo(b.getCreatedAt()))
-                .orElseThrow();
+        Duration lifetime = req.lifetimeDays() != null
+                ? Duration.ofDays(req.lifetimeDays())
+                : null;
+        ApiKeyService.IssuedApiKey issued =
+                apiKeyService.create(currentUserId(), req.name(), lifetime);
+        ApiKeyEntity created = issued.apiKey();
         return new CreateApiKeyResponse(created.getId(), created.getName(),
-                token, created.getExpiresAt());
+                issued.token(), created.getExpiresAt());
     }
 
     @DELETE

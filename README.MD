@@ -13,7 +13,6 @@ Extension Quarkus fournissant une authentification duale **OIDC** + **API Key JW
 - [Utilisation](#utilisation)
 - [SPI et extensibilité](#spi-et-extensibilité)
 - [API REST exposée](#api-rest-exposée)
-- [Dev UI](#dev-ui)
 - [FAQ et dépannage](#faq-et-dépannage)
 
 ---
@@ -107,7 +106,6 @@ norskel-auth/
 | `UserResource` / `ApiKeyResource` | runtime | Endpoints REST exposés |
 | `AuthBuildTimeConfig` / `AuthRuntimeConfig` | runtime | Configuration |
 | `AuthModuleProcessor` | deployment | BuildSteps de l'extension |
-| `AuthDevUIProcessor` | deployment | Intégration Dev UI |
 
 ---
 
@@ -166,9 +164,9 @@ mp.jwt.verify.publickey.location=classpath:api-token-public.pem
 smallrye.jwt.sign.key.location=api-token-private.pem
 ```
 
-L'extension préconfigure automatiquement :
+À partir des propriétés build-time `norskel-auth-build.*`, l'extension préconfigure automatiquement :
 
-- `smallrye.jwt.token.header=X-Api-Key` (les API keys sont lues sur ce header)
+- `mp.jwt.token.header=X-Api-Key` (les API keys sont lues sur ce header)
 - `mp.jwt.verify.issuer=norskel-auth` (issuer attendu pour les API keys)
 
 Ces valeurs peuvent être overridées dans `application.properties` si besoin.
@@ -179,15 +177,15 @@ Ces valeurs peuvent être overridées dans `application.properties` si besoin.
 
 | Property | Défaut | Description |
 |----------|--------|-------------|
-| `norskel-auth.api-token.header` | `X-Api-Key` | Header HTTP portant la clé API |
-| `norskel-auth.api-token.issuer` | `norskel-auth` | Issuer des JWT API keys |
+| `norskel-auth-build.api-token-header` | `X-Api-Key` | Header HTTP portant la clé API |
+| `norskel-auth-build.api-token-issuer` | `norskel-auth` | Issuer des JWT API keys |
 
 #### Runtime (modifiables par environnement)
 
 | Property | Défaut | Description |
 |----------|--------|-------------|
-| `norskel-auth.api-token.default-ttl` | _(vide)_ | TTL par défaut des nouvelles clés (ISO-8601, ex: `P30D`) |
-| `norskel-auth.api-token.track-usage` | `true` | Mise à jour du `lastUsedAt` à chaque requête |
+| `norskel-auth.api-token.default-ttl` | _(vide)_ | TTL de repli (ISO-8601, ex: `P30D`) utilisé quand une clé est créée sans `lifetimeDays`. Si ni l'un ni l'autre n'est fourni, la création est rejetée. |
+| `norskel-auth.api-token.track-usage` | `true` | Mise à jour du `lastUsedAt` de la clé à chaque requête authentifiée |
 | `norskel-auth.api-token.usage-update-throttle` | `PT1M` | Fréquence minimale d'update du `lastUsedAt` |
 | `norskel-auth.user.auto-create-on-oidc` | `true` | Création auto au premier login OIDC |
 | `norskel-auth.user.default-role` | `user` | Rôle par défaut des nouveaux utilisateurs |
@@ -437,18 +435,6 @@ L'extension inclut `quarkus-smallrye-openapi`. Une fois l'application démarrée
 
 ---
 
-## Dev UI
-
-En mode `quarkus:dev`, une carte **Auth Module** apparaît dans la Dev UI (`http://localhost:8080/q/dev/`) avec trois pages :
-
-- **Users** — liste interactive des utilisateurs avec actions ban/unban
-- **API Keys** — liste des clés avec révocation en un clic
-- **Overview** — statistiques (nombre d'utilisateurs actifs, bannis, clés actives/expirées)
-
-Ces pages communiquent avec le backend via JSON-RPC et reflètent en temps réel l'état de la base.
-
----
-
 ## FAQ et dépannage
 
 ### "GitLab me renvoie un token opaque, pas un JWT"
@@ -478,7 +464,7 @@ Vérifiez que :
 apiKeyService.revokeAllForUser(userId);
 ```
 
-À noter : la révocation invalide les API keys (vérification en base à chaque requête), mais pas les tokens OIDC actifs — ceux-ci doivent être révoqués côté IDP.
+À noter : la révocation invalide les API keys (vérification en base à chaque requête). De plus, bannir un utilisateur bloque immédiatement ses clés API — l'état de l'utilisateur est revérifié à chaque requête authentifiée par clé. En revanche, les tokens OIDC actifs ne sont pas révoqués côté extension ; ils doivent l'être côté IDP.
 
 ### "Mes utilisateurs ne sont pas créés automatiquement"
 

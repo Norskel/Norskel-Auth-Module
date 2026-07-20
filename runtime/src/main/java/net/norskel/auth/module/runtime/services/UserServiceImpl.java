@@ -4,7 +4,6 @@ import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.NotFoundException;
-import net.norskel.auth.module.runtime.config.AuthBuildTimeConfig;
 import net.norskel.auth.module.runtime.config.AuthRuntimeConfig;
 import net.norskel.auth.module.runtime.entities.UserEntity;
 import net.norskel.auth.module.runtime.enums.UserStateEnum;
@@ -47,7 +46,13 @@ public class UserServiceImpl implements UserService {
 
         return userStore.findByOidcId(subject)
                 .map(existing -> syncIfChanged(existing, emailStr, nameStr))
-                .orElseGet(() -> createFromOidc(subject, emailStr, nameStr));
+                .orElseGet(() -> {
+                    if (!config.user().autoCreateOnOidc()) {
+                        throw new NoSuchElementException(
+                                "Unknown OIDC user and auto-create is disabled: " + subject);
+                    }
+                    return createFromOidc(subject, emailStr, nameStr);
+                });
     }
 
     private UserEntity syncIfChanged(UserEntity user, String email, String name) {

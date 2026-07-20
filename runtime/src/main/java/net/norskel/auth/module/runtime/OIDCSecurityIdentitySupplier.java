@@ -6,6 +6,9 @@ import io.quarkus.security.identity.SecurityIdentity;
 import io.quarkus.security.runtime.QuarkusSecurityIdentity;
 import jakarta.enterprise.context.Dependent;
 import jakarta.inject.Inject;
+import jakarta.json.JsonArray;
+import jakarta.json.JsonString;
+import jakarta.json.JsonValue;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import net.norskel.auth.module.runtime.config.AuthRuntimeConfig;
@@ -13,6 +16,9 @@ import net.norskel.auth.module.runtime.entities.UserEntity;
 import net.norskel.auth.module.runtime.enums.UserStateEnum;
 import net.norskel.auth.module.runtime.spi.UserService;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -44,13 +50,14 @@ public class OIDCSecurityIdentitySupplier implements Supplier<SecurityIdentity> 
             throw new AuthenticationFailedException("Missing userinfo from OIDC provider");
         }
 
-        String subject = userInfo.getString("sub");
+        String subjectClaim = config.user().subjectClaim();
+        String subject = userInfo.getString(subjectClaim);
         if (subject == null || subject.isBlank()) {
-            log.warn("[OIDC] Missing 'sub' claim in userinfo");
+            log.warn("[OIDC] Missing '{}' claim in userinfo", subjectClaim);
             throw new AuthenticationFailedException("Missing subject claim");
         }
 
-        String email = userInfo.getString("email");
+        String email = resolveEmail(userInfo);
         String name = firstNonBlank(
                 userInfo.getString("preferred_username"),
                 userInfo.getString("nickname"),
@@ -83,12 +90,67 @@ public class OIDCSecurityIdentitySupplier implements Supplier<SecurityIdentity> 
                 ? user.getRole()
                 : config.user().defaultRole();
 
-        return QuarkusSecurityIdentity.builder(identity)
+        QuarkusSecurityIdentity.Builder builder = QuarkusSecurityIdentity.builder(identity)
                 .addRole(role)
                 .addAttribute("user_id", user.getId())
                 .addAttribute("user", user)
-                .addAttribute("auth_source", "oidc")
-                .build();
+                .addAttribute("auth_source", "oidc");
+
+        // Rôles additionnels issus du token (claim configurable)
+        resolveRoles(userInfo).forEach(builder::addRole);
+
+        return builder.build();
+    }
+
+    /** First non-blank value among the configured email claims. */
+    private String resolveEmail(UserInfo userInfo) {
+        for (String claim : config.user().emailClaims()) {
+            String value = userInfo.getString(claim.trim());
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    /** Roles read from the optional configured roles claim (array or delimited string). */
+    private List<String> resolveRoles(UserInfo userInfo) {
+        Optional<String> rolesClaim = config.user().rolesClaim();
+        if (rolesClaim.isEmpty()) {
+            return List.of();
+        }
+        String claim = rolesClaim.get();
+        if (!userInfo.contains(claim)) {
+            return List.of();
+        }
+
+        List<String> roles = new ArrayList<>();
+        JsonArray array = safeArray(userInfo, claim);
+        if (array != null) {
+            for (JsonValue value : array) {
+                if (value instanceof JsonString s) {
+                    roles.add(s.getString());
+                } else {
+                    roles.add(value.toString());
+                }
+            }
+        } else {
+            String single = userInfo.getString(claim);
+            if (single != null && !single.isBlank()) {
+                for (String r : single.split("[,\\s]+")) {
+                    if (!r.isBlank()) roles.add(r);
+                }
+            }
+        }
+        return roles;
+    }
+
+    private static JsonArray safeArray(UserInfo userInfo, String claim) {
+        try {
+            return userInfo.getArray(claim);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private static String firstNonBlank(String... values) {

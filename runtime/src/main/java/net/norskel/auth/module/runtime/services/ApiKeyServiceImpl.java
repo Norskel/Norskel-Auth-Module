@@ -7,7 +7,6 @@ import jakarta.inject.Inject;
 import net.norskel.auth.module.runtime.config.AuthBuildTimeConfig;
 import net.norskel.auth.module.runtime.config.AuthRuntimeConfig;
 import net.norskel.auth.module.runtime.entities.ApiKeyEntity;
-import net.norskel.auth.module.runtime.entities.UserEntity;
 import net.norskel.auth.module.runtime.enums.UserStateEnum;
 import net.norskel.auth.module.runtime.spi.ApiKeyService;
 import net.norskel.auth.module.runtime.spi.ApiKeyStore;
@@ -39,6 +38,9 @@ public class ApiKeyServiceImpl implements ApiKeyService {
     @Inject
     AuthBuildTimeConfig buildTimeConfig;
 
+    @Inject
+    AuthRuntimeConfig runtimeConfig;
+
     @Override
     public List<ApiKeyEntity> listByUser(UUID userId) {
         Objects.requireNonNull(userId, "userId must not be null");
@@ -54,10 +56,18 @@ public class ApiKeyServiceImpl implements ApiKeyService {
     }
 
     @Override
-    public String create(UUID userId, String name, int lifetimeDays) {
+    public IssuedApiKey create(UUID userId, String name, Duration lifetime) {
         Objects.requireNonNull(userId, "userId must not be null");
-        if (lifetimeDays <= 0) {
-            throw new IllegalArgumentException("lifetimeDays must be > 0");
+
+        Duration ttl = lifetime != null
+                ? lifetime
+                : runtimeConfig.apiToken().defaultTtl().orElse(null);
+        if (ttl == null) {
+            throw new IllegalArgumentException(
+                    "lifetime is required (no norskel-auth.api-token.default-ttl configured)");
+        }
+        if (ttl.isZero() || ttl.isNegative()) {
+            throw new IllegalArgumentException("lifetime must be positive");
         }
 
         // Vérifie que le user existe (lance NoSuchElementException sinon)
@@ -68,7 +78,7 @@ public class ApiKeyServiceImpl implements ApiKeyService {
 
         UUID jti = UUID.randomUUID();
         OffsetDateTime now = OffsetDateTime.now();
-        OffsetDateTime exp = now.plus(Duration.ofDays(lifetimeDays));
+        OffsetDateTime exp = now.plus(ttl);
 
         ApiKeyEntity entity = new ApiKeyEntity();
         entity.setId(jti);
@@ -79,14 +89,16 @@ public class ApiKeyServiceImpl implements ApiKeyService {
         entity.setRevoked(false);
         apiKeyStore.persist(entity);
 
-        return Jwt.issuer(this.buildTimeConfig.apiTokenjwtIssuer())
+        String token = Jwt.issuer(this.buildTimeConfig.apiTokenIssuer())
                 .subject(userId.toString())
                 .claim("token_name", name)
                 .claim("auth_source", "api-key")
-                .claim("jti", jti)
+                .claim("jti", jti.toString())
                 .issuedAt(now.toInstant())
                 .expiresAt(exp.toInstant())
                 .sign();
+
+        return new IssuedApiKey(entity, token);
     }
 
     @Override
@@ -129,5 +141,20 @@ public class ApiKeyServiceImpl implements ApiKeyService {
                         || k.getExpiresAt().isAfter(OffsetDateTime.now()))
                 .isPresent();
     }
-}
 
+    @Override
+    public void recordUsage(UUID apiKey) {
+        if (apiKey == null) return;
+        if (!runtimeConfig.apiToken().trackUsage()) return;
+
+        apiKeyStore.findById(apiKey).ifPresent(key -> {
+            OffsetDateTime now = OffsetDateTime.now();
+            Duration throttle = runtimeConfig.apiToken().usageUpdateThrottle();
+            OffsetDateTime last = key.getLastUsedAt();
+            if (last == null || last.plus(throttle).isBefore(now)) {
+                key.setLastUsedAt(now);
+                apiKeyStore.update(key);
+            }
+        });
+    }
+}

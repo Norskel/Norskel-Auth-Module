@@ -49,7 +49,7 @@ public class UserEntity {
     @NotBlank()
     @Schema(example = "hermes_user")
     @JsonProperty(value = "role")
-    protected String role = "admin";
+    protected String role;
 
     /**
      * The Gitlab id.

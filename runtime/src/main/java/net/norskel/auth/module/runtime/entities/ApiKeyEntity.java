@@ -26,6 +26,7 @@ public class ApiKeyEntity {
 
     @Schema(readOnly = true)
     @JsonProperty(value = "revoked")
+    @Builder.Default
     private Boolean revoked = false;
 
     @Schema(examples = "hermes_user")
@@ -47,9 +48,9 @@ public class ApiKeyEntity {
     private OffsetDateTime createdAt;
 
     @Schema(readOnly = true)
-    @JsonProperty(value = "last_login", access = JsonProperty.Access.READ_ONLY)
+    @JsonProperty(value = "last_used_at", access = JsonProperty.Access.READ_ONLY)
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
-    private OffsetDateTime lastLogin;
+    private OffsetDateTime lastUsedAt;
 
     @Schema(readOnly = true)
     @JsonProperty(value = "revoked_at", access = JsonProperty.Access.READ_ONLY)

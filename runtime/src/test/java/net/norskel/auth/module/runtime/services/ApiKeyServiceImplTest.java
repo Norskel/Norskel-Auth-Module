@@ -1,6 +1,7 @@
 package net.norskel.auth.module.runtime.services;
 
 import net.norskel.auth.module.runtime.config.AuthBuildTimeConfig;
+import net.norskel.auth.module.runtime.config.AuthRuntimeConfig;
 import net.norskel.auth.module.runtime.entities.ApiKeyEntity;
 import net.norskel.auth.module.runtime.entities.UserEntity;
 import net.norskel.auth.module.runtime.enums.UserStateEnum;
@@ -8,10 +9,12 @@ import net.norskel.auth.module.runtime.spi.ApiKeyStore;
 import net.norskel.auth.module.runtime.spi.UserService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Answers;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -33,6 +36,9 @@ class ApiKeyServiceImplTest {
 
     @Mock
     AuthBuildTimeConfig buildTimeConfig;
+
+    @Mock(answer = Answers.RETURNS_DEEP_STUBS)
+    AuthRuntimeConfig runtimeConfig;
 
     @InjectMocks
     ApiKeyServiceImpl service;
@@ -245,19 +251,27 @@ class ApiKeyServiceImplTest {
 
     @Test
     void create_throwsForNullUserId() {
-        assertThrows(NullPointerException.class, () -> service.create(null, "key", 30));
+        assertThrows(NullPointerException.class,
+                () -> service.create(null, "key", Duration.ofDays(30)));
     }
 
     @Test
-    void create_throwsForZeroLifetimeDays() {
+    void create_throwsForZeroLifetime() {
         assertThrows(IllegalArgumentException.class,
-                () -> service.create(UUID.randomUUID(), "key", 0));
+                () -> service.create(UUID.randomUUID(), "key", Duration.ZERO));
     }
 
     @Test
-    void create_throwsForNegativeLifetimeDays() {
+    void create_throwsForNegativeLifetime() {
         assertThrows(IllegalArgumentException.class,
-                () -> service.create(UUID.randomUUID(), "key", -5));
+                () -> service.create(UUID.randomUUID(), "key", Duration.ofDays(-5)));
+    }
+
+    @Test
+    void create_throwsWhenNoLifetimeAndNoDefaultTtl() {
+        when(runtimeConfig.apiToken().defaultTtl()).thenReturn(Optional.empty());
+        assertThrows(IllegalArgumentException.class,
+                () -> service.create(UUID.randomUUID(), "key", null));
     }
 
     @Test
@@ -265,7 +279,8 @@ class ApiKeyServiceImplTest {
         UUID userId = UUID.randomUUID();
         when(userService.findById(userId)).thenThrow(new NoSuchElementException("no user"));
 
-        assertThrows(NoSuchElementException.class, () -> service.create(userId, "key", 30));
+        assertThrows(NoSuchElementException.class,
+                () -> service.create(userId, "key", Duration.ofDays(30)));
     }
 
     @Test
@@ -275,6 +290,55 @@ class ApiKeyServiceImplTest {
         blocked.setState(UserStateEnum.BLOCKED);
         when(userService.findById(userId)).thenReturn(blocked);
 
-        assertThrows(IllegalStateException.class, () -> service.create(userId, "key", 30));
+        assertThrows(IllegalStateException.class,
+                () -> service.create(userId, "key", Duration.ofDays(30)));
+    }
+
+    // --- recordUsage ---
+
+    @Test
+    void recordUsage_doesNothing_forNull() {
+        service.recordUsage(null);
+        verifyNoInteractions(apiKeyStore);
+    }
+
+    @Test
+    void recordUsage_doesNothing_whenTrackingDisabled() {
+        when(runtimeConfig.apiToken().trackUsage()).thenReturn(false);
+        service.recordUsage(UUID.randomUUID());
+        verifyNoInteractions(apiKeyStore);
+    }
+
+    @Test
+    void recordUsage_updatesLastUsedAt_whenNeverUsed() {
+        UUID id = UUID.randomUUID();
+        ApiKeyEntity k = new ApiKeyEntity();
+        k.setId(id);
+        k.setLastUsedAt(null);
+
+        when(runtimeConfig.apiToken().trackUsage()).thenReturn(true);
+        when(runtimeConfig.apiToken().usageUpdateThrottle()).thenReturn(Duration.ofMinutes(1));
+        when(apiKeyStore.findById(id)).thenReturn(Optional.of(k));
+
+        service.recordUsage(id);
+
+        assertNotNull(k.getLastUsedAt());
+        verify(apiKeyStore).update(k);
+    }
+
+    @Test
+    void recordUsage_skipsUpdate_withinThrottleWindow() {
+        UUID id = UUID.randomUUID();
+        ApiKeyEntity k = new ApiKeyEntity();
+        k.setId(id);
+        k.setLastUsedAt(OffsetDateTime.now());
+
+        when(runtimeConfig.apiToken().trackUsage()).thenReturn(true);
+        when(runtimeConfig.apiToken().usageUpdateThrottle()).thenReturn(Duration.ofMinutes(5));
+        when(apiKeyStore.findById(id)).thenReturn(Optional.of(k));
+
+        service.recordUsage(id);
+
+        verify(apiKeyStore, never()).update(any());
     }
 }

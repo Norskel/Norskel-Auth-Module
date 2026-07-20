@@ -16,7 +16,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -42,6 +44,10 @@ class OIDCSecurityIdentitySupplierTest {
     @BeforeEach
     void setUp() {
         supplier.setIdentity(identity);
+        lenient().when(config.user().subjectClaim()).thenReturn("sub");
+        lenient().when(config.user().emailClaims())
+                .thenReturn(List.of("email", "preferred_username"));
+        lenient().when(config.user().rolesClaim()).thenReturn(Optional.empty());
     }
 
     @Test

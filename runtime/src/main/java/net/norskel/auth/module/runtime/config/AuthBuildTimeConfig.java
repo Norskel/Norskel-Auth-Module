@@ -21,5 +21,5 @@ public interface AuthBuildTimeConfig {
 
     /** JWT issuer for signed API tokens. */
     @WithDefault("norskel-auth")
-    String apiTokenjwtIssuer();
+    String apiTokenIssuer();
 }

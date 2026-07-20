@@ -8,6 +8,5 @@ package net.norskel.auth.module.runtime.dto;
  **/
 public record CreateApiKeyRequest(
         String name,
-        String role,
-        int lifetimeDays
+        Integer lifetimeDays
 ) {}

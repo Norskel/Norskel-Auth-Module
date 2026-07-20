@@ -55,7 +55,7 @@ class AuthModuleProcessor {
 
         // mp.jwt.verify.issuer par défaut
         defaults.produce(new RunTimeConfigurationDefaultBuildItem(
-                "mp.jwt.verify.issuer", authBuildTimeConfig.apiTokenjwtIssuer()));
+                "mp.jwt.verify.issuer", authBuildTimeConfig.apiTokenIssuer()));
 
         // L'utilisateur peut override ces valeurs dans son application.properties
     }

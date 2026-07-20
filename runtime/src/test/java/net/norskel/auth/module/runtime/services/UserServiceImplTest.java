@@ -36,6 +36,7 @@ class UserServiceImplTest {
     @BeforeEach
     void setUp() {
         lenient().when(config.user().defaultRole()).thenReturn("user");
+        lenient().when(config.user().autoCreateOnOidc()).thenReturn(true);
     }
 
     // --- findAll ---
@@ -68,6 +69,16 @@ class UserServiceImplTest {
         assertEquals("sub-1", result.getOidcId());
         assertEquals("mail@test.com", result.getEmail());
         assertEquals("user", result.getRole());
+    }
+
+    @Test
+    void upsertFromOidc_rejectsUnknownUser_whenAutoCreateDisabled() {
+        when(config.user().autoCreateOnOidc()).thenReturn(false);
+        when(userStore.findByOidcId("sub-new")).thenReturn(Optional.empty());
+
+        assertThrows(NoSuchElementException.class,
+                () -> service.upsertFromOidc("sub-new", "mail@test.com", "Alice"));
+        verify(userStore, never()).persist(any());
     }
 
     @Test
