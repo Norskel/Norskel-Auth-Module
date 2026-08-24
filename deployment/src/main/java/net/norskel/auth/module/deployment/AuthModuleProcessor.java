@@ -9,6 +9,7 @@ import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
 import net.norskel.auth.module.runtime.JwtSecurityIdentitySupplier;
 import net.norskel.auth.module.runtime.OIDCSecurityIdentitySupplier;
 import net.norskel.auth.module.runtime.UserRoleAugmentor;
+import net.norskel.auth.module.runtime.roles.ClaimRoleResolver;
 import net.norskel.auth.module.runtime.config.AuthBuildTimeConfig;
 import net.norskel.auth.module.runtime.entities.ApiKeyEntity;
 import net.norskel.auth.module.runtime.entities.UserEntity;
@@ -39,7 +40,8 @@ class AuthModuleProcessor {
                         UserResource.class,
                         UserRoleAugmentor.class,
                         OIDCSecurityIdentitySupplier.class,
-                        JwtSecurityIdentitySupplier.class)
+                        JwtSecurityIdentitySupplier.class,
+                        ClaimRoleResolver.class)
                 .build();
     }
 

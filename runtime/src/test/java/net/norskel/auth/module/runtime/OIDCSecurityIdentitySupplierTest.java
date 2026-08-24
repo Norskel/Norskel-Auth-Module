@@ -6,6 +6,7 @@ import io.quarkus.security.identity.SecurityIdentity;
 import io.quarkus.security.runtime.QuarkusSecurityIdentity;
 import net.norskel.auth.module.runtime.config.AuthRuntimeConfig;
 import net.norskel.auth.module.runtime.entities.UserEntity;
+import net.norskel.auth.module.runtime.roles.ClaimRoleResolver;
 import net.norskel.auth.module.runtime.enums.UserStateEnum;
 import net.norskel.auth.module.runtime.spi.UserService;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +39,9 @@ class OIDCSecurityIdentitySupplierTest {
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     AuthRuntimeConfig config;
 
+    @Mock
+    ClaimRoleResolver claimRoleResolver;
+
     @InjectMocks
     OIDCSecurityIdentitySupplier supplier;
 
@@ -47,6 +51,8 @@ class OIDCSecurityIdentitySupplierTest {
         lenient().when(config.user().emailClaims())
                 .thenReturn(List.of("email", "preferred_username"));
         lenient().when(config.user().rolesClaim()).thenReturn(Optional.empty());
+        // No role-mapping rule by default, so the existing tests keep asserting what they did.
+        lenient().when(claimRoleResolver.rolesFor(any(UserInfo.class))).thenReturn(Set.of());
     }
 
     @Test
