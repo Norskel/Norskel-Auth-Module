@@ -3,9 +3,9 @@ package net.norskel.auth.module.runtime.entities;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import net.norskel.auth.module.runtime.enums.UserStateEnum;
+import net.norskel.auth.module.runtime.enums.UserTypeEnum;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 
 import java.time.OffsetDateTime;
@@ -37,8 +37,12 @@ public class UserEntity {
 
     /**
      * The Email.
+     *
+     * <p>Required for {@link UserTypeEnum#HUMAN}, always {@code null} for
+     * {@link UserTypeEnum#SERVICE}. Enforced in {@code UserServiceImpl} rather
+     * than by bean validation, which cannot express "required only for one
+     * type".
      */
-    @NotBlank()
     @Schema(example = "test@example.fr")
     @JsonProperty(value = "email")
     protected String email;
@@ -52,9 +56,12 @@ public class UserEntity {
     protected String role;
 
     /**
-     * The Gitlab id.
+     * Subject claim from the identity provider.
+     *
+     * <p>Required for {@link UserTypeEnum#HUMAN}, and necessarily {@code null}
+     * for {@link UserTypeEnum#SERVICE}: a service never logs in through OIDC.
+     * See {@code UserServiceImpl} for the check.
      */
-    @NotNull()
     @Schema(examples = "42")
     @JsonProperty(value = "oidc_id")
     protected String oidcId;
@@ -66,11 +73,22 @@ public class UserEntity {
     protected String avatarUrl;
 
     /**
-     * The State.
+     * Whether this row is a person or a machine caller.
+     */
+    @Schema(examples = "HUMAN")
+    @JsonProperty(value = "type")
+    @Builder.Default
+    protected UserTypeEnum type = UserTypeEnum.HUMAN;
+
+    /**
+     * The State. Defaults to {@link UserStateEnum#ACTIVE}; setting it to
+     * {@link UserStateEnum#BLOCKED} disables every API key the row owns, for
+     * services exactly as for people.
      */
     @Schema(readOnly = true, examples = "ACTIVE")
     @JsonProperty(value = "state")
-    protected UserStateEnum state;
+    @Builder.Default
+    protected UserStateEnum state = UserStateEnum.ACTIVE;
 
     /**
      * The Id.
@@ -78,6 +96,18 @@ public class UserEntity {
     @Schema(readOnly = true)
     @JsonProperty(value = "id")
     private UUID id;
+
+    /**
+     * Which identity created this row.
+     *
+     * <p>{@code null} for a person who self-created through OIDC. For a
+     * {@code SERVICE} row it names the admin responsible, which is the audit
+     * trail that lets you find the services a departing admin left behind.
+     * Read-only over HTTP so a client cannot forge it.
+     */
+    @Schema(readOnly = true)
+    @JsonProperty(value = "created_by", access = JsonProperty.Access.READ_ONLY)
+    private UUID createdBy;
 
     /**
      * The Created at.

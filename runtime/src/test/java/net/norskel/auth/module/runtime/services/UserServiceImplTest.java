@@ -3,6 +3,10 @@ package net.norskel.auth.module.runtime.services;
 import net.norskel.auth.module.runtime.config.AuthRuntimeConfig;
 import net.norskel.auth.module.runtime.entities.UserEntity;
 import net.norskel.auth.module.runtime.enums.UserStateEnum;
+import net.norskel.auth.module.runtime.enums.UserTypeEnum;
+import net.norskel.auth.module.runtime.exceptions.AuthConflictException;
+import net.norskel.auth.module.runtime.exceptions.AuthNotFoundException;
+import net.norskel.auth.module.runtime.exceptions.AuthValidationException;
 import net.norskel.auth.module.runtime.spi.UserStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -113,6 +117,33 @@ class UserServiceImplTest {
         assertEquals("NewName", existing.getUsername());
     }
 
+    /**
+     * The provider can rename a person at any time, so a returning login must be
+     * guarded exactly like a first one — otherwise a person can be renamed onto a
+     * service's username and shadow it.
+     */
+    @Test
+    void upsertFromOidc_rejectsRenameOntoAServiceUsername() {
+        UserEntity existing = new UserEntity();
+        existing.setId(UUID.randomUUID());
+        existing.setOidcId("sub-4");
+        existing.setEmail("dave@test.com");
+        existing.setUsername("OldName");
+
+        UserEntity svc = new UserEntity();
+        svc.setId(UUID.randomUUID());
+        svc.setUsername("report-collector");
+        svc.setType(UserTypeEnum.SERVICE);
+
+        when(userStore.findByOidcId("sub-4")).thenReturn(Optional.of(existing));
+        when(userStore.findAll()).thenReturn(List.of(existing, svc));
+
+        assertThrows(AuthConflictException.class,
+                () -> service.upsertFromOidc("sub-4", "dave@test.com", "report-collector"));
+        verify(userStore, never()).update(any());
+        assertEquals("OldName", existing.getUsername());
+    }
+
     @Test
     void upsertFromOidc_doesNotUpdateWhenNothingChanged() {
         UserEntity existing = new UserEntity();
@@ -134,24 +165,32 @@ class UserServiceImplTest {
         assertThrows(NullPointerException.class, () -> service.create(null));
     }
 
+    /** A minimally valid person; create() now enforces the per-type field rules. */
+    private static UserEntity humanUser() {
+        UserEntity u = new UserEntity();
+        u.setUsername("someone");
+        u.setEmail("someone@test.com");
+        u.setOidcId("oidc-someone");
+        return u;
+    }
+
     @Test
     void create_assignsIdAndCreatedAtWhenAbsent() {
-        UserEntity u = new UserEntity();
-        // oidcId and username are null → uniqueness checks are skipped, only persist is called
         when(userStore.persist(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        UserEntity result = service.create(u);
+        UserEntity result = service.create(humanUser());
 
         assertNotNull(result.getId());
         assertNotNull(result.getCreatedAt());
+        assertEquals(UserTypeEnum.HUMAN, result.getType());
+        assertEquals(UserStateEnum.ACTIVE, result.getState());
     }
 
     @Test
     void create_keepsExistingId() {
         UUID id = UUID.randomUUID();
-        UserEntity u = new UserEntity();
+        UserEntity u = humanUser();
         u.setId(id);
-        // oidcId and username are null → uniqueness checks are skipped
         when(userStore.persist(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.create(u);
@@ -161,7 +200,7 @@ class UserServiceImplTest {
 
     @Test
     void create_throwsOnDuplicateOidcId() {
-        UserEntity u = new UserEntity();
+        UserEntity u = humanUser();
         u.setOidcId("dup-oidc");
         when(userStore.findByOidcId("dup-oidc")).thenReturn(Optional.of(new UserEntity()));
 
@@ -170,12 +209,127 @@ class UserServiceImplTest {
 
     @Test
     void create_throwsOnDuplicateUsername() {
-        UserEntity u = new UserEntity();
+        UserEntity u = humanUser();
         u.setUsername("dup-user");
-        // oidcId is null → findByOidcId is skipped; only findByUsername is called
-        when(userStore.findByUsername("dup-user")).thenReturn(Optional.of(new UserEntity()));
+        when(userStore.findByOidcId(any())).thenReturn(Optional.empty());
+        UserEntity other = humanUser();
+        other.setId(UUID.randomUUID());
+        other.setUsername("dup-user");
+        when(userStore.findAll()).thenReturn(List.of(other));
 
         assertThrows(IllegalStateException.class, () -> service.create(u));
+    }
+
+    // --- per-type validation ---
+
+    @Test
+    void create_requiresEmailAndOidcIdForAHuman() {
+        UserEntity noEmail = humanUser();
+        noEmail.setEmail(null);
+        assertThrows(AuthValidationException.class, () -> service.create(noEmail));
+
+        UserEntity noOidc = humanUser();
+        noOidc.setOidcId(null);
+        assertThrows(AuthValidationException.class, () -> service.create(noOidc));
+    }
+
+    @Test
+    void create_rejectsAServiceCarryingHumanOnlyFields() {
+        UserEntity withOidc = new UserEntity();
+        withOidc.setUsername("svc");
+        withOidc.setRole("billing");
+        withOidc.setType(UserTypeEnum.SERVICE);
+        withOidc.setOidcId("should-not-be-here");
+        assertThrows(AuthValidationException.class, () -> service.create(withOidc));
+
+        UserEntity withEmail = new UserEntity();
+        withEmail.setUsername("svc");
+        withEmail.setRole("billing");
+        withEmail.setType(UserTypeEnum.SERVICE);
+        withEmail.setEmail("svc@test.com");
+        assertThrows(AuthValidationException.class, () -> service.create(withEmail));
+    }
+
+    @Test
+    void create_requiresARoleForAService() {
+        UserEntity svc = new UserEntity();
+        svc.setUsername("svc");
+        svc.setType(UserTypeEnum.SERVICE);
+        assertThrows(AuthValidationException.class, () -> service.create(svc));
+    }
+
+    @Test
+    void create_acceptsAValidService() {
+        UserEntity svc = new UserEntity();
+        svc.setUsername("billing-worker");
+        svc.setRole("billing");
+        svc.setType(UserTypeEnum.SERVICE);
+        when(userStore.persist(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        UserEntity created = service.create(svc);
+
+        assertEquals(UserTypeEnum.SERVICE, created.getType());
+        assertEquals(UserStateEnum.ACTIVE, created.getState());
+        assertNull(created.getOidcId());
+    }
+
+    // --- findOrCreateService ---
+
+    @Test
+    void findOrCreateService_createsWhenAbsent() {
+        when(userStore.findByUsername("svc")).thenReturn(Optional.empty());
+        when(userStore.persist(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        UserEntity svc = service.findOrCreateService("svc", "billing");
+
+        assertEquals(UserTypeEnum.SERVICE, svc.getType());
+        assertEquals("billing", svc.getRole());
+    }
+
+    @Test
+    void findOrCreateService_recordsWhoCreatedTheService() {
+        UUID admin = UUID.randomUUID();
+        when(userStore.findByUsername("svc")).thenReturn(Optional.empty());
+        when(userStore.persist(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        UserEntity svc = service.findOrCreateService("svc", "billing", admin);
+
+        // Without this, a departing admin's leftover services are untraceable.
+        assertEquals(admin, svc.getCreatedBy());
+    }
+
+    @Test
+    void findOrCreateService_reusesTheExistingService() {
+        UserEntity existing = UserEntity.builder()
+                .id(UUID.randomUUID()).username("svc").role("billing")
+                .type(UserTypeEnum.SERVICE).build();
+        when(userStore.findByUsername("svc")).thenReturn(Optional.of(existing));
+
+        assertEquals(existing, service.findOrCreateService("svc", "billing"));
+        verify(userStore, never()).persist(any());
+    }
+
+    @Test
+    void findOrCreateService_refusesToChangeTheRoleOfAnExistingService() {
+        // Otherwise minting a key would silently escalate the service.
+        UserEntity existing = UserEntity.builder()
+                .id(UUID.randomUUID()).username("svc").role("billing")
+                .type(UserTypeEnum.SERVICE).build();
+        when(userStore.findByUsername("svc")).thenReturn(Optional.of(existing));
+
+        assertThrows(AuthConflictException.class,
+                () -> service.findOrCreateService("svc", "admin"));
+    }
+
+    @Test
+    void findOrCreateService_refusesToHijackAHumanUsername() {
+        UserEntity human = UserEntity.builder()
+                .id(UUID.randomUUID()).username("alice").role("user")
+                .type(UserTypeEnum.HUMAN).build();
+        when(userStore.findByUsername("alice")).thenReturn(Optional.of(human));
+
+        assertThrows(AuthConflictException.class,
+                () -> service.findOrCreateService("alice", "billing"));
     }
 
     // --- findByOidcId ---
@@ -261,14 +415,58 @@ class UserServiceImplTest {
 
     @Test
     void update_delegatesToStore() {
-        UUID id = UUID.randomUUID();
-        UserEntity u = new UserEntity();
-        u.setId(id);
+        UserEntity u = humanUser();
+        u.setId(UUID.randomUUID());
+        when(userStore.findAll()).thenReturn(List.of(u));
         when(userStore.update(u)).thenReturn(u);
 
         service.update(u);
 
         verify(userStore).update(u);
+    }
+
+    @Test
+    void update_rejectsEmailOnAService() {
+        UserEntity svc = new UserEntity();
+        svc.setId(UUID.randomUUID());
+        svc.setUsername("report-collector");
+        svc.setRole("collector");
+        svc.setType(UserTypeEnum.SERVICE);
+        svc.setEmail("leaked@test.com");
+
+        assertThrows(AuthValidationException.class, () -> service.update(svc));
+        verify(userStore, never()).update(any());
+    }
+
+    @Test
+    void update_rejectsRenameOntoAnotherUsername() {
+        UserEntity svc = new UserEntity();
+        svc.setId(UUID.randomUUID());
+        svc.setUsername("report-collector");
+        svc.setRole("collector");
+        svc.setType(UserTypeEnum.SERVICE);
+
+        // The person has already been renamed in place, as an in-place store
+        // would have it by the time update() runs.
+        UserEntity person = humanUser();
+        person.setId(UUID.randomUUID());
+        person.setUsername("report-collector");
+        when(userStore.findAll()).thenReturn(List.of(person, svc));
+
+        assertThrows(AuthConflictException.class, () -> service.update(person));
+        verify(userStore, never()).update(any());
+    }
+
+    @Test
+    void update_rejectsBlankRoleOnAService() {
+        UserEntity svc = new UserEntity();
+        svc.setId(UUID.randomUUID());
+        svc.setUsername("report-collector");
+        svc.setType(UserTypeEnum.SERVICE);
+        svc.setRole("");
+
+        assertThrows(AuthValidationException.class, () -> service.update(svc));
+        verify(userStore, never()).update(any());
     }
 
     // --- banUser / unbanUser ---
@@ -332,8 +530,25 @@ class UserServiceImplTest {
     // --- deleteById ---
 
     @Test
-    void deleteById_throwsUnsupportedOperation() {
-        assertThrows(UnsupportedOperationException.class,
-                () -> service.deleteById(UUID.randomUUID()));
+    void deleteById_throwsForNullId() {
+        assertThrows(NullPointerException.class, () -> service.deleteById(null));
+    }
+
+    @Test
+    void deleteById_delegatesToStore() {
+        UUID id = UUID.randomUUID();
+        when(userStore.deleteById(id)).thenReturn(true);
+
+        service.deleteById(id);
+
+        verify(userStore).deleteById(id);
+    }
+
+    @Test
+    void deleteById_throwsNotFound_whenStoreRemovedNothing() {
+        UUID id = UUID.randomUUID();
+        when(userStore.deleteById(id)).thenReturn(false);
+
+        assertThrows(AuthNotFoundException.class, () -> service.deleteById(id));
     }
 }

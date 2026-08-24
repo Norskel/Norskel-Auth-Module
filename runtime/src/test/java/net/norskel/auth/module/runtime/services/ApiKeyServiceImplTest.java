@@ -5,6 +5,8 @@ import net.norskel.auth.module.runtime.config.AuthRuntimeConfig;
 import net.norskel.auth.module.runtime.entities.ApiKeyEntity;
 import net.norskel.auth.module.runtime.entities.UserEntity;
 import net.norskel.auth.module.runtime.enums.UserStateEnum;
+import net.norskel.auth.module.runtime.enums.UserTypeEnum;
+import net.norskel.auth.module.runtime.exceptions.AuthConflictException;
 import net.norskel.auth.module.runtime.spi.ApiKeyStore;
 import net.norskel.auth.module.runtime.spi.UserService;
 import org.junit.jupiter.api.Test;
@@ -23,6 +25,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -294,51 +297,54 @@ class ApiKeyServiceImplTest {
                 () -> service.create(userId, "key", Duration.ofDays(30)));
     }
 
-    // --- recordUsage ---
+    // --- service keys (pre-JWT-signing validations only, as above) ---
+
+    // --- service keys: now a thin composition over create() ---
 
     @Test
-    void recordUsage_doesNothing_forNull() {
-        service.recordUsage(null);
-        verifyNoInteractions(apiKeyStore);
+    void createServiceKey_delegatesToTheServiceLookupThenTheOrdinaryCreateFlow() {
+        // Ownership of the issued key is asserted end-to-end in
+        // AuthModuleIntegrationTest, which has real signing keys; this test only
+        // pins the delegation, since create() signs a token.
+        UUID svcId = UUID.randomUUID();
+        UserEntity svc = UserEntity.builder()
+                .id(svcId).username("billing-worker").role("billing")
+                .type(UserTypeEnum.SERVICE).state(UserStateEnum.BLOCKED)
+                .build();
+        when(userService.findOrCreateService(eq("billing-worker"), eq("billing"), any()))
+                .thenReturn(svc);
+        when(userService.findById(svcId)).thenReturn(svc);
+
+        // Blocked service => create() refuses before reaching the signer, which
+        // also shows the service goes through the same guard as a person.
+        assertThrows(AuthConflictException.class, () -> service
+                .createServiceKey("billing-worker", "nightly", "billing", Duration.ofDays(1)));
+        verify(userService).findOrCreateService(eq("billing-worker"), eq("billing"), any());
+        verify(apiKeyStore, never()).persist(any());
     }
 
     @Test
-    void recordUsage_doesNothing_whenTrackingDisabled() {
-        when(runtimeConfig.apiToken().trackUsage()).thenReturn(false);
-        service.recordUsage(UUID.randomUUID());
-        verifyNoInteractions(apiKeyStore);
+    void createServiceKey_propagatesConflictFromTheServiceLookup() {
+        when(userService.findOrCreateService(eq("taken"), eq("billing"), any()))
+                .thenThrow(new IllegalStateException("already exists with role x"));
+
+        assertThrows(IllegalStateException.class, () -> service
+                .createServiceKey("taken", "nightly", "billing", Duration.ofDays(1)));
+        verify(apiKeyStore, never()).persist(any());
     }
 
     @Test
-    void recordUsage_updatesLastUsedAt_whenNeverUsed() {
-        UUID id = UUID.randomUUID();
-        ApiKeyEntity k = new ApiKeyEntity();
-        k.setId(id);
-        k.setLastUsedAt(null);
+    void listServiceKeys_collectsKeysOfEveryServiceUser() {
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        when(userService.findByType(UserTypeEnum.SERVICE)).thenReturn(List.of(
+                UserEntity.builder().id(a).type(UserTypeEnum.SERVICE).build(),
+                UserEntity.builder().id(b).type(UserTypeEnum.SERVICE).build()));
+        ApiKeyEntity k1 = new ApiKeyEntity();
+        ApiKeyEntity k2 = new ApiKeyEntity();
+        when(apiKeyStore.findByUser(a)).thenReturn(List.of(k1));
+        when(apiKeyStore.findByUser(b)).thenReturn(List.of(k2));
 
-        when(runtimeConfig.apiToken().trackUsage()).thenReturn(true);
-        when(runtimeConfig.apiToken().usageUpdateThrottle()).thenReturn(Duration.ofMinutes(1));
-        when(apiKeyStore.findById(id)).thenReturn(Optional.of(k));
-
-        service.recordUsage(id);
-
-        assertNotNull(k.getLastUsedAt());
-        verify(apiKeyStore).update(k);
-    }
-
-    @Test
-    void recordUsage_skipsUpdate_withinThrottleWindow() {
-        UUID id = UUID.randomUUID();
-        ApiKeyEntity k = new ApiKeyEntity();
-        k.setId(id);
-        k.setLastUsedAt(OffsetDateTime.now());
-
-        when(runtimeConfig.apiToken().trackUsage()).thenReturn(true);
-        when(runtimeConfig.apiToken().usageUpdateThrottle()).thenReturn(Duration.ofMinutes(5));
-        when(apiKeyStore.findById(id)).thenReturn(Optional.of(k));
-
-        service.recordUsage(id);
-
-        verify(apiKeyStore, never()).update(any());
+        assertEquals(List.of(k1, k2), service.listServiceKeys());
     }
 }

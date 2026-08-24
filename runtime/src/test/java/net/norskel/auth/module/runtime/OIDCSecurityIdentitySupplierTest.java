@@ -43,7 +43,6 @@ class OIDCSecurityIdentitySupplierTest {
 
     @BeforeEach
     void setUp() {
-        supplier.setIdentity(identity);
         lenient().when(config.user().subjectClaim()).thenReturn("sub");
         lenient().when(config.user().emailClaims())
                 .thenReturn(List.of("email", "preferred_username"));
@@ -54,7 +53,7 @@ class OIDCSecurityIdentitySupplierTest {
     void get_throwsWhenUserInfoMissing() {
         doReturn(null).when(identity).getAttribute("userinfo");
 
-        assertThrows(AuthenticationFailedException.class, () -> supplier.get());
+        assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
         verify(userService, never()).upsertFromOidc(any(), any(), any());
     }
 
@@ -64,7 +63,7 @@ class OIDCSecurityIdentitySupplierTest {
         when(userInfo.getString("sub")).thenReturn(null);
         doReturn(userInfo).when(identity).getAttribute("userinfo");
 
-        assertThrows(AuthenticationFailedException.class, () -> supplier.get());
+        assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
         verify(userService, never()).upsertFromOidc(any(), any(), any());
     }
 
@@ -74,7 +73,7 @@ class OIDCSecurityIdentitySupplierTest {
         when(userInfo.getString("sub")).thenReturn("   ");
         doReturn(userInfo).when(identity).getAttribute("userinfo");
 
-        assertThrows(AuthenticationFailedException.class, () -> supplier.get());
+        assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
         verify(userService, never()).upsertFromOidc(any(), any(), any());
     }
 
@@ -88,7 +87,7 @@ class OIDCSecurityIdentitySupplierTest {
         when(userService.upsertFromOidc(any(), any(), any()))
                 .thenThrow(new RuntimeException("DB error"));
 
-        assertThrows(AuthenticationFailedException.class, () -> supplier.get());
+        assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
     }
 
     @Test
@@ -104,7 +103,7 @@ class OIDCSecurityIdentitySupplierTest {
         blocked.setState(UserStateEnum.BLOCKED);
         when(userService.upsertFromOidc(any(), any(), any())).thenReturn(blocked);
 
-        assertThrows(AuthenticationFailedException.class, () -> supplier.get());
+        assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
         verify(userService, never()).updateLastLogin(any());
     }
 
@@ -120,7 +119,7 @@ class OIDCSecurityIdentitySupplierTest {
         when(userService.upsertFromOidc(any(), any(), any())).thenReturn(user);
         stubIdentityForBuilder();
 
-        supplier.get();
+        supplier.augment(identity);
 
         verify(userService).updateLastLogin(user);
     }
@@ -139,7 +138,7 @@ class OIDCSecurityIdentitySupplierTest {
         when(userService.upsertFromOidc(any(), any(), any())).thenReturn(user);
         stubIdentityForBuilder();
 
-        SecurityIdentity result = supplier.get();
+        SecurityIdentity result = supplier.augment(identity);
 
         assertTrue(result.getRoles().contains("editor"));
         assertEquals(userId, result.getAttribute("user_id"));
@@ -159,7 +158,7 @@ class OIDCSecurityIdentitySupplierTest {
         when(userService.upsertFromOidc("sub-1", "user@test.com", "pref-name")).thenReturn(user);
         stubIdentityForBuilder();
 
-        supplier.get();
+        supplier.augment(identity);
 
         verify(userService).upsertFromOidc("sub-1", "user@test.com", "pref-name");
     }
@@ -177,7 +176,7 @@ class OIDCSecurityIdentitySupplierTest {
         when(userService.upsertFromOidc("sub-2", "user@test.com", "nick-name")).thenReturn(user);
         stubIdentityForBuilder();
 
-        supplier.get();
+        supplier.augment(identity);
 
         verify(userService).upsertFromOidc("sub-2", "user@test.com", "nick-name");
     }

@@ -23,10 +23,10 @@ Extension Quarkus fournissant une authentification duale **OIDC** + **API Key JW
 
 - Une authentification **OIDC** (testée avec GitLab, compatible Keycloak/Auth0)
 - Une authentification par **API Key** sous forme de JWT auto-signé
+- Des **identités de service** (utilisateurs de type `SERVICE`) porteuses de clés API
 - Un modèle utilisateur unifié (auto-création au premier login OIDC)
 - Des endpoints REST pour gérer les utilisateurs et leurs clés API
 - Un SPI pour brancher sa propre persistance (jOOQ, Panache, MongoDB, etc.)
-- Une intégration Dev UI pour visualiser/administrer en mode développement
 
 ### Cas d'usage cible
 
@@ -90,8 +90,14 @@ L'extension suit la structure standard Quarkus :
 ```
 norskel-auth/
 ├── runtime/        ← code utilisé par l'application finale
-└── deployment/     ← BuildSteps, Dev UI, config build-time
+├── deployment/     ← BuildSteps, config build-time
+└── example-app/    ← application de démo consommant l'extension
 ```
+
+Un exemple exécutable se trouve dans [`example-app/`](example-app/README.md).
+Depuis la racine : `mvn package -DskipTests` puis
+`java -jar example-app/target/quarkus-app/quarkus-run.jar` démarre une
+application qui affiche des commandes `curl` prêtes à l'emploi.
 
 ### Composants principaux
 
@@ -163,6 +169,21 @@ quarkus.oidc.authentication.user-info-required=true
 mp.jwt.verify.publickey.location=classpath:api-token-public.pem
 smallrye.jwt.sign.key.location=api-token-private.pem
 ```
+
+> ⚠️ `user-info-required=true` est obligatoire : `OIDCSecurityIdentitySupplier`
+> lit l'attribut `userinfo` et rejette l'authentification s'il est absent. Trois
+> conséquences :
+>
+> - Si vous désactivez la découverte (`quarkus.oidc.discovery-enabled=false`), il
+>   faut **aussi** déclarer `quarkus.oidc.user-info-path`, sinon l'application
+>   échoue au démarrage avec `UserInfo is required but
+>   'quarkus.oidc.user-info-path' is not configured.`
+> - Les tokens doivent porter le scope **`openid`**. Sans lui, l'endpoint
+>   `userinfo` de Keycloak répond 403 et l'application renvoie un 401 sans
+>   explication.
+> - Définir `quarkus.oidc.auth-server-url` **désactive Dev Services for
+>   Keycloak**. En dev/test, laissez la propriété absente pour obtenir un
+>   Keycloak automatique ; voir [`example-app/`](example-app/README.md).
 
 À partir des propriétés build-time `norskel-auth-build.*`, l'extension préconfigure automatiquement :
 
@@ -330,6 +351,7 @@ public interface UserStore {
     List<UserEntity> findAll();
     UserEntity persist(UserEntity user);
     UserEntity update(UserEntity user);
+    boolean deleteById(UUID id);   // true si un user a été supprimé
 }
 ```
 
@@ -343,6 +365,27 @@ public interface ApiKeyStore {
     ApiKeyEntity update(ApiKeyEntity key);
 }
 ```
+
+> Toute clé a un `userId`, y compris celles d'un service : il n'y a **qu'une**
+> forme de clé, donc aucun discriminant à respecter côté implémentation.
+
+### Gestion des erreurs
+
+Les erreurs métier des services sont traduites en statuts HTTP par
+`AuthExceptionMappers`, avec un corps `{"error": "...", "message": "..."}` :
+
+| Exception | Statut | Cas typique |
+|-----------|--------|-------------|
+| `AuthNotFoundException` | `404` | User ou clé API inexistant |
+| `AuthValidationException` | `400` | TTL absent ou non positif |
+| `AuthConflictException` | `409` | Username/oidcId déjà pris, clé pour un user banni |
+| `AuthForbiddenException` | `403` | Révocation d'une clé dont on n'est pas propriétaire |
+
+Ces exceptions étendent respectivement `NoSuchElementException`,
+`IllegalArgumentException`, `IllegalStateException` et `SecurityException`. Une
+implémentation de store qui lève les types JDK reste donc compatible — mais
+seuls les sous-types de l'extension sont mappés, afin de ne pas modifier la
+façon dont l'application hôte rapporte ses propres erreurs.
 
 #### Exemple — implémentation jOOQ
 
@@ -423,8 +466,113 @@ L'extension expose deux ressources REST sous le préfixe `/auth/`. Toutes les r�
 | `DELETE` | `/auth/api-keys/me/{id}` | `@Authenticated` | Révoque une clé spécifique |
 | `GET` | `/auth/api-keys/users/{userId}` | `admin` | Liste les clés d'un utilisateur |
 | `GET` | `/auth/api-keys/{id}` | `admin` | Récupère une clé |
-| `DELETE` | `/auth/api-keys/{id}` | `admin` | Révoque n'importe quelle clé |
+| `DELETE` | `/auth/api-keys/{id}` | `admin` | Révoque n'importe quelle clé (user ou système) |
 | `DELETE` | `/auth/api-keys/users/{userId}` | `admin` | Révoque toutes les clés d'un user |
+| `GET` | `/auth/api-keys/service` | `admin` | Liste les clés de service |
+| `POST` | `/auth/api-keys/service` | `admin` | Crée une clé de service |
+
+---
+
+## Clés de service (identités de service)
+
+Un **service est un utilisateur** de type `SERVICE` : une ligne `UserEntity` sans
+`oidcId` ni `email`, qui possède des clés API comme n'importe quel utilisateur.
+
+C'est un choix délibéré. Il n'existe ni seconde entité, ni store supplémentaire,
+ni forme de clé particulière — donc rien à discriminer. Le cycle de vie
+utilisateur est réutilisé tel quel : bannir la ligne désactive toutes ses clés
+d'un coup, le rôle appartient à l'identité au lieu d'être recopié sur chaque clé,
+et l'unicité du nom est celle des `username`.
+
+```bash
+curl -X POST http://localhost:8080/auth/api-keys/service \
+  -H "X-Api-Key: <clé-admin>" -H "Content-Type: application/json" \
+  -d '{"serviceName":"billing-worker","name":"nightly-batch",
+       "role":"billing","lifetimeDays":90}'
+```
+
+L'appel crée (ou réutilise) l'utilisateur `SERVICE` nommé `billing-worker`, puis
+émet une clé ordinaire lui appartenant. La réponse contient le token en clair
+**une seule fois**, comme pour une clé utilisateur.
+
+### Forme de l'identité
+
+Une identité de service porte bien un `user_id` — celui de sa ligne `SERVICE`.
+Le code applicatif distingue donc les machines des personnes via `auth_source`
+(constantes dans `AuthAttributes`), **jamais** via l'absence d'utilisateur :
+
+| Attribut | Clé utilisateur | Clé de service |
+|----------|-----------------|----------------|
+| `auth_source` | `api-key` | `service-api-key` |
+| `user_id` | l'UUID du user | l'UUID de la ligne `SERVICE` |
+| `user` | le `UserEntity` | le `UserEntity` du service |
+| `service_name` | absent | ex. `billing-worker` |
+| rôles | ceux du user | ceux de la ligne `SERVICE` |
+
+### Cycle de vie
+
+- **Kill switch** : `POST /auth/users/{id}/ban` sur la ligne du service
+  désactive immédiatement **toutes** ses clés. C'est la façon recommandée de
+  couper un service compromis.
+- **Rotation** : rappeler `POST /auth/api-keys/service` avec le même
+  `serviceName` émet une clé supplémentaire. Plusieurs clés actives par service
+  sont donc permises — c'est ce qui rend la rotation sans coupure possible.
+- **Changement de rôle refusé** en passant par la création de clé : un
+  `serviceName` existant avec un rôle différent renvoie 409. Modifiez
+  l'utilisateur explicitement (`PUT /auth/users/{id}`).
+- **Lecture seule sur soi-même** : une clé de service peut lire
+  `GET /auth/users/me` et `GET /auth/api-keys/me`, mais toute écriture sur les
+  endpoints `/me` renvoie 403 — sinon une clé fuitée pourrait s'émettre une
+  remplaçante qui survivrait à la révocation de la clé fuitée.
+- **Révocation d'une clé précise** : `DELETE /auth/api-keys/{id}` (rôle `admin`).
+- L'expiration et le suivi de `lastUsedAt` fonctionnent comme pour les clés
+  utilisateur.
+
+> ⚠️ Un `SERVICE` avec `role: "admin"` peut créer d'autres services, puisque
+> l'endpoint est protégé par `@RolesAllowed("admin")`. Attribuez un rôle dédié
+> (`billing`, `report-ingest`, …) et n'accordez `admin` que si le service doit
+> réellement administrer l'authentification.
+
+### Traçabilité (`created_by`)
+
+`UserEntity` et `ApiKeyEntity` portent un `created_by` : l'identité qui a créé la
+ligne ou émis la clé. C'est de la **provenance**, pas de la propriété — pour une
+clé de service, `user_id` est le service et `created_by` l'admin qui l'a montée.
+
+- Le champ est `READ_ONLY` en JSON : un client ne peut pas le falsifier, la valeur
+  est toujours celle de l'appelant authentifié.
+- `null` pour une personne auto-créée via OIDC, et pour les clés émises par
+  programme (bootstrap, tests).
+
+> ⚠️ **Départ d'un administrateur** : bannir son compte désactive ses propres
+> clés, mais **pas** les services qu'il a créés — ceux-ci appartiennent à leur
+> propre ligne `SERVICE`. Auditez `GET /auth/api-keys/service` et
+> `GET /auth/users`, filtrez sur `created_by`, et bannissez les lignes `SERVICE`
+> devenues orphelines.
+
+### Créer un service directement
+
+`POST /auth/api-keys/service` est un raccourci. L'endpoint utilisateur standard
+fonctionne aussi, ce qui permet de créer un service sans lui émettre de clé :
+
+```bash
+curl -X POST http://localhost:8080/auth/users \
+  -H "X-Api-Key: <clé-admin>" -H "Content-Type: application/json" \
+  -d '{"username":"billing-worker","role":"billing","type":"SERVICE"}'
+```
+
+Règles par type, vérifiées à la création :
+
+| Champ | `HUMAN` | `SERVICE` |
+|-------|---------|-----------|
+| `username` | requis | requis (et unique) |
+| `email` | requis | doit être absent |
+| `oidc_id` | requis | doit être absent |
+| `role` | optionnel (défaut configuré) | requis |
+
+Un login OIDC dont le `preferred_username` correspond à un service existant est
+**refusé** (409) : les usernames viennent de l'IDP, qu'on ne contrôle pas, et une
+personne ne doit pas pouvoir usurper le nom d'un service dans les logs et audits.
 
 ### Documentation OpenAPI
 

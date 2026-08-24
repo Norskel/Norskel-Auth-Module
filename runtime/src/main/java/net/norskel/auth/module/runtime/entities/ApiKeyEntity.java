@@ -29,10 +29,11 @@ public class ApiKeyEntity {
     @Builder.Default
     private Boolean revoked = false;
 
-    @Schema(examples = "hermes_user")
-    @JsonProperty(value = "role")
-    private String role;
-
+    /**
+     * Owning user. Always set: a service key is owned by a {@code UserEntity}
+     * of type {@code SERVICE}, so there is no second kind of key and no
+     * discriminator to get wrong.
+     */
     @Schema(examples = "1")
     @JsonProperty(value = "user_id")
     private UUID userId;
@@ -41,6 +42,17 @@ public class ApiKeyEntity {
     @JsonProperty(value = "expires_at")
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
     private OffsetDateTime expiresAt;
+
+    /**
+     * Which identity issued this key.
+     *
+     * <p>Provenance, not ownership: for a self-issued key it equals
+     * {@link #userId}, for a service key it is the admin who minted it. Read-only
+     * over HTTP so a client cannot forge it.
+     */
+    @Schema(readOnly = true)
+    @JsonProperty(value = "created_by", access = JsonProperty.Access.READ_ONLY)
+    private UUID createdBy;
 
     @Schema(readOnly = true)
     @JsonProperty(value = "created_at", access = JsonProperty.Access.READ_ONLY)

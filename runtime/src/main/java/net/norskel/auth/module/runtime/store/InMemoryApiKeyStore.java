@@ -33,6 +33,7 @@ public class InMemoryApiKeyStore implements ApiKeyStore {
                 .toList();
     }
 
+
     @Override
     public ApiKeyEntity persist(ApiKeyEntity apiKeyEntity) {
         Objects.requireNonNull(apiKeyEntity, "apiKeyEntity must not be null");

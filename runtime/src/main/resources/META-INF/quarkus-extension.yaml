@@ -1,9 +1,14 @@
 name: Auth Module
-#description: Do something useful.
+description: Dual OIDC and self-signed API-key JWT authentication with a unified user model, REST management endpoints and a pluggable persistence SPI.
 metadata:
-#  keywords:
-#    - auth-module
-#  guide: ... # To create and publish this guide, see https://github.com/quarkiverse/quarkiverse/wiki#documenting-your-extension
-#  categories:
-#    - "miscellaneous"
-#  status: "preview"
+  keywords:
+    - auth
+    - authentication
+    - oidc
+    - api-key
+    - jwt
+    - security
+  categories:
+    - "security"
+  status: "preview"
+  guide: "https://github.com/Norskel/Norskel-Auth-Module#readme"

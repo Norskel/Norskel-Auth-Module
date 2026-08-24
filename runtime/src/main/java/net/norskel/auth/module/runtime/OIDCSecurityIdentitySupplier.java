@@ -4,12 +4,11 @@ import io.quarkus.oidc.UserInfo;
 import io.quarkus.security.AuthenticationFailedException;
 import io.quarkus.security.identity.SecurityIdentity;
 import io.quarkus.security.runtime.QuarkusSecurityIdentity;
-import jakarta.enterprise.context.Dependent;
+import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.json.JsonArray;
 import jakarta.json.JsonString;
 import jakarta.json.JsonValue;
-import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import net.norskel.auth.module.runtime.config.AuthRuntimeConfig;
 import net.norskel.auth.module.runtime.entities.UserEntity;
@@ -19,21 +18,19 @@ import net.norskel.auth.module.runtime.spi.UserService;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Supplier;
 
 /**
  * OIDCSecurityIdentitySupplier
  *
+ * <p>Stateless: the identity to augment is passed in per call, so a single
+ * application-scoped instance is shared across requests.
+ *
  * @author Norskel
  * @since 30.03.2026
  **/
-@Dependent
+@ApplicationScoped
 @Slf4j
-public class OIDCSecurityIdentitySupplier implements Supplier<SecurityIdentity> {
-
-    @Setter
-    private SecurityIdentity identity;
-
+public class OIDCSecurityIdentitySupplier {
 
     @Inject
     UserService userService;
@@ -41,8 +38,7 @@ public class OIDCSecurityIdentitySupplier implements Supplier<SecurityIdentity> 
     @Inject
     AuthRuntimeConfig config;
 
-    @Override
-    public SecurityIdentity get() {
+    public SecurityIdentity augment(SecurityIdentity identity) {
         // 1. Récupérer les infos utilisateur depuis l'introspection OIDC
         UserInfo userInfo = identity.getAttribute("userinfo");
         if (userInfo == null) {
@@ -92,9 +88,9 @@ public class OIDCSecurityIdentitySupplier implements Supplier<SecurityIdentity> 
 
         QuarkusSecurityIdentity.Builder builder = QuarkusSecurityIdentity.builder(identity)
                 .addRole(role)
-                .addAttribute("user_id", user.getId())
-                .addAttribute("user", user)
-                .addAttribute("auth_source", "oidc");
+                .addAttribute(AuthAttributes.USER_ID, user.getId())
+                .addAttribute(AuthAttributes.USER, user)
+                .addAttribute(AuthAttributes.AUTH_SOURCE, AuthAttributes.SOURCE_OIDC);
 
         // Rôles additionnels issus du token (claim configurable)
         resolveRoles(userInfo).forEach(builder::addRole);

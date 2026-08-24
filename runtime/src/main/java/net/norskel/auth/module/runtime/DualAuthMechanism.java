@@ -28,7 +28,7 @@ import java.util.Set;
  **/
 
 @Slf4j
-@ApplicationScoped
+//@ApplicationScoped removed for the moment
 public class DualAuthMechanism implements HttpAuthenticationMechanism {
 
 

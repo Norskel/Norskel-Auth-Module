@@ -69,4 +69,10 @@ public class InMemoryUserStore implements UserStore {
         }
         return userEntity;
     }
+
+    @Override
+    public boolean deleteById(UUID id) {
+        if (id == null) return false;
+        return users.remove(id) != null;
+    }
 }

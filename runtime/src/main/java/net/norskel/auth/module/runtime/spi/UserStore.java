@@ -25,4 +25,12 @@ public interface UserStore {
     List<UserEntity> findAll();
 
     Optional<UserEntity> findByUsername(String username);
+
+    /**
+     * Removes the user with the given id.
+     *
+     * @return {@code true} if a user was removed, {@code false} if no user
+     *         existed with that id.
+     */
+    boolean deleteById(UUID id);
 }

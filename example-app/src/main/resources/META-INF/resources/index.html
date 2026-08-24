@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>auth-module — testeur de routes</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --line: #e3e6ea; --text: #1c2024;
+    --muted: #6b7280; --accent: #3b5bdb; --ok: #2f8132; --warn: #b45309;
+    --err: #c02626; --code: #f1f3f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c; --card: #1e2126; --line: #2e333a; --text: #e6e8eb;
+      --muted: #9aa3ad; --accent: #7c9dfd; --ok: #67c46b; --warn: #e0a03c;
+      --err: #f07171; --code: #14161a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--text);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin-bottom: 20px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+       color: var(--muted); margin: 0 0 12px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input[type=text], textarea {
+    width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--bg); color: var(--text); font-family: ui-monospace, monospace;
+    font-size: 12px;
+  }
+  textarea { resize: vertical; min-height: 62px; }
+  button {
+    border: 1px solid var(--line); background: var(--card); color: var(--text);
+    border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { opacity: .9; color: #fff; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+  .row > div { flex: 1; min-width: 180px; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+  .idsel { display: flex; gap: 14px; margin: 10px 0 0; flex-wrap: wrap; }
+  .idsel label { display: flex; gap: 6px; align-items: center; font-size: 13px;
+                 color: var(--text); margin: 0; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 7px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+  tr:first-child td { border-top: none; }
+  .m { font-family: ui-monospace, monospace; font-size: 11px; font-weight: 600;
+       padding: 2px 6px; border-radius: 4px; background: var(--code); }
+  .m.GET { color: var(--ok); } .m.POST { color: var(--accent); }
+  .m.PUT { color: var(--warn); } .m.DELETE { color: var(--err); }
+  .path { font-family: ui-monospace, monospace; font-size: 12.5px; }
+  .note { color: var(--muted); font-size: 11.5px; }
+  .st { font-family: ui-monospace, monospace; font-size: 12px; font-weight: 600;
+        padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+  .st.s2 { color: #fff; background: var(--ok); }
+  .st.s4 { color: #fff; background: var(--warn); }
+  .st.s5, .st.sx { color: #fff; background: var(--err); }
+  pre {
+    margin: 6px 0 0; padding: 8px 10px; background: var(--code); border-radius: 6px;
+    font-size: 11.5px; white-space: pre-wrap; word-break: break-word;
+    max-height: 220px; overflow: auto;
+  }
+  .cell-act { width: 1%; white-space: nowrap; }
+  .cell-st { width: 1%; }
+  .danger .path { color: var(--err); }
+  .banner {
+    border-left: 3px solid var(--warn); padding: 8px 12px; background: var(--code);
+    border-radius: 0 6px 6px 0; font-size: 12.5px; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>auth-module — testeur de routes</h1>
+  <div class="sub">Exerce toutes les routes de l'extension et de l'application d'exemple.</div>
+
+  <div class="card">
+    <h2>Identité</h2>
+    <div class="row">
+      <div>
+        <label for="userKey">Clé utilisateur (rôle <code>admin</code>)</label>
+        <input type="text" id="userKey" placeholder="eyJ...">
+      </div>
+      <div>
+        <label for="serviceKey">Clé de service (rôle <code>report-ingest</code>)</label>
+        <input type="text" id="serviceKey" placeholder="eyJ...">
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div>
+        <label for="oidcToken">Token OIDC (<code>Authorization: Bearer</code>)</label>
+        <input type="text" id="oidcToken" placeholder="obtenu via Dev Services Keycloak">
+      </div>
+      <div style="flex:0 0 auto">
+        <label for="oidcUser">Utilisateur</label>
+        <select id="oidcUser" style="padding:7px 9px;border:1px solid var(--line);
+                border-radius:6px;background:var(--bg);color:var(--text)">
+          <option value="alice">alice (groups: admin, user)</option>
+          <option value="bob">bob (groups: user)</option>
+        </select>
+      </div>
+    </div>
+    <div class="idsel">
+      <label><input type="radio" name="which" value="userKey" checked> Clé utilisateur</label>
+      <label><input type="radio" name="which" value="serviceKey"> Clé de service</label>
+      <label><input type="radio" name="which" value="oidcToken"> Token OIDC</label>
+      <label><input type="radio" name="which" value="none"> Aucune (non authentifié)</label>
+    </div>
+    <div class="toolbar">
+      <button class="primary" id="load">Charger les tokens de démo</button>
+      <button id="loadOidc">Obtenir un token OIDC</button>
+      <button id="runAll">Tout tester (non destructif)</button>
+      <span class="note" id="summary"></span>
+    </div>
+    <div class="banner" id="oidcBanner" style="display:none;margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <h2>Paramètres de chemin</h2>
+    <div class="row">
+      <div>
+        <label for="userId">userId</label>
+        <input type="text" id="userId" placeholder="uuid">
+      </div>
+      <div>
+        <label for="keyId">keyId</label>
+        <input type="text" id="keyId" placeholder="uuid">
+      </div>
+    </div>
+    <div class="toolbar">
+      <button id="fillMe">Remplir userId depuis /auth/users/me</button>
+      <button id="fillKey">Remplir keyId depuis /auth/api-keys/me</button>
+    </div>
+  </div>
+
+  <div id="groups"></div>
+
+  <div class="card">
+    <div class="banner">
+      Le store par défaut est en mémoire : redémarrer l'application remet les
+      données à zéro. Les routes en rouge sont exclues de « Tout tester » car
+      elles peuvent casser la session en cours — bannir ou supprimer
+      l'utilisateur dont vous utilisez la clé invalide celle-ci sur-le-champ, et
+      tout le reste répondrait alors 401.
+    </div>
+  </div>
+</div>
+
+<script>
+const GROUPS = [
+  { name: "Application d'exemple", routes: [
+    { m:"GET",  p:"/reports/whoami", note:"les deux identités — 200" },
+    { m:"GET",  p:"/reports/mine",   note:"clé de service → 403 (réservé aux personnes)" },
+    { m:"GET",  p:"/reports/all",    note:"rôle admin" },
+    { m:"POST", p:"/reports/ingest", note:"rôle report-ingest — clé utilisateur → 403" },
+  ]},
+  { name: "Extension — utilisateurs", routes: [
+    { m:"GET",  p:"/auth/users/me", note:"clé de service → 200 (sa propre ligne)" },
+    { m:"PUT",  p:"/auth/users/me", body:'{"name":"Nom mis à jour"}',
+      note:"clé de service → 403 (lecture seule sur soi-même)" },
+    { m:"GET",  p:"/auth/users",    note:"admin" },
+    { m:"GET",  p:"/auth/users/{userId}" },
+    { m:"POST", p:"/auth/users",
+      body:'{"username":"nouveau","email":"n@example.test","role":"user","oidc_id":"oidc-nouveau"}',
+      note:"rejouer → 409" },
+    { m:"PUT",  p:"/auth/users/{userId}", body:'{"role":"admin"}' },
+    { m:"POST", p:"/auth/users/{userId}/ban", danger:true,
+      note:"si userId = vous, vos clés cessent immédiatement de fonctionner" },
+    { m:"POST", p:"/auth/users/{userId}/unban" },
+    { m:"DELETE", p:"/auth/users/{userId}", danger:true },
+  ]},
+  { name: "Extension — clés API", routes: [
+    { m:"GET",  p:"/auth/api-keys/me" },
+    { m:"POST", p:"/auth/api-keys/me", body:'{"name":"depuis-ui","lifetimeDays":7}' },
+    { m:"GET",  p:"/auth/api-keys/service", note:"admin" },
+    { m:"POST", p:"/auth/api-keys/service",
+      body:'{"serviceName":"ui-service","name":"depuis-ui","role":"report-ingest","lifetimeDays":30}',
+      note:"cree/reutilise l'utilisateur SERVICE ; rejouer = rotation de cle" },
+    { m:"GET",  p:"/auth/api-keys/users/{userId}" },
+    { m:"GET",  p:"/auth/api-keys/{keyId}" },
+    { m:"DELETE", p:"/auth/api-keys/me/{keyId}", danger:true },
+    { m:"DELETE", p:"/auth/api-keys/{keyId}", danger:true, note:"révocation admin" },
+    { m:"DELETE", p:"/auth/api-keys/me", danger:true, note:"révoque TOUTES ses clés" },
+    { m:"DELETE", p:"/auth/api-keys/users/{userId}", danger:true },
+  ]},
+];
+
+const $ = id => document.getElementById(id);
+const rows = [];
+
+function resolvePath(p) {
+  return p.replace("{userId}", $("userId").value.trim() || "{userId}")
+          .replace("{keyId}",  $("keyId").value.trim()  || "{keyId}");
+}
+
+// The extension accepts API keys on X-Api-Key and OIDC tokens on Authorization,
+// so the header depends on which identity is selected.
+function authHeaders() {
+  const which = document.querySelector('input[name=which]:checked').value;
+  if (which === "none") return {};
+  const value = $(which).value.trim();
+  if (!value) return {};
+  return which === "oidcToken"
+      ? { "Authorization": "Bearer " + value }
+      : { "X-Api-Key": value };
+}
+
+async function call(route, target) {
+  const path = resolvePath(route.p);
+  if (path.includes("{")) {
+    show(target, "sx", "params", "Renseignez le paramètre de chemin manquant : " + path);
+    return null;
+  }
+  const headers = authHeaders();
+  // UserResource/ApiKeyResource declare @Consumes(APPLICATION_JSON) at class
+  // level, so even bodyless POSTs need the content type or they get a 415.
+  if (route.body || route.m === "POST" || route.m === "PUT") {
+    headers["Content-Type"] = "application/json";
+  }
+
+  try {
+    const res = await fetch(path, { method: route.m, headers, body: route.body || undefined });
+    const text = await res.text();
+    let pretty = text;
+    try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (e) { /* not json */ }
+    show(target, "s" + String(res.status)[0], res.status, pretty || "(corps vide)");
+    return res.status;
+  } catch (e) {
+    show(target, "sx", "ERR", String(e));
+    return null;
+  }
+}
+
+function show(target, cls, status, body) {
+  target.st.className = "st " + cls;
+  target.st.textContent = status;
+  target.out.textContent = body;
+  target.out.style.display = "block";
+}
+
+function render() {
+  const host = $("groups");
+  GROUPS.forEach(g => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<h2>${g.name}</h2>`;
+    const table = document.createElement("table");
+
+    g.routes.forEach(route => {
+      const tr = document.createElement("tr");
+      if (route.danger) tr.className = "danger";
+
+      const tdInfo = document.createElement("td");
+      tdInfo.innerHTML =
+        `<span class="m ${route.m}">${route.m}</span> <span class="path">${route.p}</span>` +
+        (route.note ? `<div class="note">${route.note}</div>` : "");
+      const out = document.createElement("pre");
+      out.style.display = "none";
+      tdInfo.appendChild(out);
+
+      if (route.body) {
+        const ta = document.createElement("textarea");
+        ta.value = route.body;
+        ta.style.marginTop = "6px";
+        tdInfo.insertBefore(ta, out);
+        route._ta = ta;
+      }
+
+      const tdSt = document.createElement("td");
+      tdSt.className = "cell-st";
+      const st = document.createElement("span");
+      tdSt.appendChild(st);
+
+      const tdAct = document.createElement("td");
+      tdAct.className = "cell-act";
+      const btn = document.createElement("button");
+      btn.textContent = "Envoyer";
+      tdAct.appendChild(btn);
+
+      const target = { st, out };
+      const entry = { route, target };
+      rows.push(entry);
+      btn.onclick = () => {
+        if (route._ta) route.body = route._ta.value;
+        call(route, target);
+      };
+
+      tr.append(tdInfo, tdSt, tdAct);
+      table.appendChild(tr);
+    });
+
+    card.appendChild(table);
+    host.appendChild(card);
+  });
+}
+
+$("load").onclick = async () => {
+  try {
+    const res = await fetch("/example/demo-tokens");
+    if (!res.ok) { $("summary").textContent = "Seeding désactivé (" + res.status + ")"; return; }
+    const t = await res.json();
+    $("userKey").value = t.userKey;
+    $("serviceKey").value = t.serviceKey;
+    $("userId").value = t.adminUserId;
+    $("summary").textContent = "Tokens chargés.";
+  } catch (e) {
+    $("summary").textContent = "Échec : " + e;
+  }
+};
+
+$("loadOidc").onclick = async () => {
+  const banner = $("oidcBanner");
+  const user = $("oidcUser").value;
+  $("summary").textContent = "Demande d'un token OIDC…";
+  try {
+    const res = await fetch("/example/oidc-token?user=" + encodeURIComponent(user));
+    const payload = await res.json();
+    if (!res.ok) {
+      banner.style.display = "block";
+      banner.textContent = "OIDC indisponible : " + (payload.message || res.status)
+        + " — Dev Services for Keycloak ne tourne qu'en mode dev/test "
+        + "(mvn quarkus:dev), pas depuis le jar packagé.";
+      $("summary").textContent = "";
+      return;
+    }
+    banner.style.display = "none";
+    $("oidcToken").value = payload.access_token;
+    document.querySelector('input[value=oidcToken]').checked = true;
+    $("summary").textContent = "Token OIDC obtenu pour " + user + " (identité sélectionnée).";
+  } catch (e) {
+    banner.style.display = "block";
+    banner.textContent = "Échec de la requête : " + e;
+  }
+};
+
+$("fillMe").onclick = async () => {
+  const res = await fetch("/auth/users/me", { headers: authHeaders() });
+  if (!res.ok) { $("summary").textContent = "/auth/users/me → " + res.status; return; }
+  $("userId").value = (await res.json()).id;
+  $("summary").textContent = "userId rempli.";
+};
+
+$("fillKey").onclick = async () => {
+  const res = await fetch("/auth/api-keys/me", { headers: authHeaders() });
+  if (!res.ok) { $("summary").textContent = "/auth/api-keys/me → " + res.status; return; }
+  const list = await res.json();
+  if (!list.length) { $("summary").textContent = "Aucune clé à lister."; return; }
+  $("keyId").value = list[0].id;
+  $("summary").textContent = "keyId rempli depuis la première clé.";
+};
+
+$("runAll").onclick = async () => {
+  const safe = rows.filter(r => !r.route.danger);
+  $("summary").textContent = "Exécution…";
+  let done = 0;
+  for (const r of safe) {
+    if (r.route._ta) r.route.body = r.route._ta.value;
+    const s = await call(r.route, r.target);
+    if (s !== null) done++;
+  }
+  $("summary").textContent = done + "/" + safe.length + " routes appelées (voir statuts).";
+};
+
+render();
+$("load").click();
+</script>
+</body>
+</html>

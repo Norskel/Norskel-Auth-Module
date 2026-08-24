@@ -8,7 +8,6 @@ import io.quarkus.security.identity.SecurityIdentityAugmentor;
 import io.quarkus.smallrye.jwt.runtime.auth.JsonWebTokenCredential;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 
@@ -23,10 +22,10 @@ import lombok.extern.slf4j.Slf4j;
 public class UserRoleAugmentor implements SecurityIdentityAugmentor {
 
     @Inject
-    Instance<JwtSecurityIdentitySupplier> jwtSecurityIdentitySuppliers;
+    JwtSecurityIdentitySupplier jwtSupplier;
 
     @Inject
-    Instance<OIDCSecurityIdentitySupplier> oidcSecurityIdentitySuppliers;
+    OIDCSecurityIdentitySupplier oidcSupplier;
 
     @Override
     public int priority() {
@@ -37,22 +36,17 @@ public class UserRoleAugmentor implements SecurityIdentityAugmentor {
     public Uni<SecurityIdentity> augment(SecurityIdentity identity,
                                          AuthenticationRequestContext context) {
 
-        log.info("Augmenting identity: {}", identity);
         if (identity.getCredential(AccessTokenCredential.class) != null) {
-            log.info("Augmenting with OIDC identity");
-            final OIDCSecurityIdentitySupplier identitySupplier = this.oidcSecurityIdentitySuppliers.get();
-            identitySupplier.setIdentity(identity);
-            return context.runBlocking(identitySupplier)
+            log.debug("Augmenting with OIDC identity");
+            return context.runBlocking(() -> oidcSupplier.augment(identity))
                     .onFailure().transform(ex -> {
                         log.warn("OIDC auth rejected: {}", ex.getMessage());
                         return new AuthenticationFailedException("OIDC auth failed", ex);
                     });
         }
         if (identity.getCredential(JsonWebTokenCredential.class) != null) {
-            log.info("Augmenting with JWT identity");
-            final JwtSecurityIdentitySupplier identitySupplier = this.jwtSecurityIdentitySuppliers.get();
-            identitySupplier.setIdentity(identity);
-            return context.runBlocking(identitySupplier)
+            log.debug("Augmenting with JWT identity");
+            return context.runBlocking(() -> jwtSupplier.augment(identity))
                     .onFailure().transform(ex -> {
                         log.warn("JWT auth rejected: {}", ex.getMessage());
                         return new AuthenticationFailedException("JWT auth failed", ex);

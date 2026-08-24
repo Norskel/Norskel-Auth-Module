@@ -151,4 +151,26 @@ class InMemoryUserStoreTest {
         UserEntity u = new UserEntity();
         assertThrows(NullPointerException.class, () -> store.update(u));
     }
+
+    // --- deleteById ---
+
+    @Test
+    void deleteById_removesUserAndReportsTrue() {
+        UserEntity u = new UserEntity();
+        u.setUsername("to-delete");
+        UUID id = store.persist(u).getId();
+
+        assertTrue(store.deleteById(id));
+        assertTrue(store.findById(id).isEmpty());
+    }
+
+    @Test
+    void deleteById_reportsFalseForUnknownId() {
+        assertFalse(store.deleteById(UUID.randomUUID()));
+    }
+
+    @Test
+    void deleteById_reportsFalseForNullId() {
+        assertFalse(store.deleteById(null));
+    }
 }
