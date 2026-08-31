@@ -89,6 +89,16 @@ public interface AuthRuntimeConfig {
          */
         @WithDefault("email,preferred_username")
         List<String> emailClaims();
+
+        /**
+         * Ordre des claims à essayer pour l'URL de l'avatar.
+         * Premier claim non vide gagné.
+         *
+         * <p>{@code picture} est le claim standard OIDC ; {@code avatar_url} est
+         * celui de GitLab/GitHub. Si aucun n'est présent, l'avatar reste inchangé.
+         */
+        @WithDefault("picture,avatar_url")
+        List<String> avatarClaims();
     }
 }
 

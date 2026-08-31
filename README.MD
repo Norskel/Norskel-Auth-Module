@@ -13,6 +13,7 @@ Extension Quarkus fournissant une authentification duale **OIDC** + **API Key JW
 - [Utilisation](#utilisation)
 - [SPI et extensibilité](#spi-et-extensibilité)
 - [API REST exposée](#api-rest-exposée)
+- [Clés de service (identités de service)](#clés-de-service-identités-de-service)
 - [FAQ et dépannage](#faq-et-dépannage)
 
 ---
@@ -95,9 +96,25 @@ norskel-auth/
 ```
 
 Un exemple exécutable se trouve dans [`example-app/`](example-app/README.md).
-Depuis la racine : `mvn package -DskipTests` puis
+Depuis la racine : `./mvnw package -DskipTests` puis
 `java -jar example-app/target/quarkus-app/quarkus-run.jar` démarre une
-application qui affiche des commandes `curl` prêtes à l'emploi.
+application qui affiche des commandes `curl` prêtes à l'emploi. Le dépôt embarque
+un wrapper Maven (3.9.11), inutile d'installer Maven.
+
+### Tests
+
+```bash
+./mvnw verify
+```
+
+- `runtime/` : tests unitaires des services, des stores in-memory et des deux
+  suppliers d'identité.
+- `deployment/` : `AuthModuleIntegrationTest` démarre l'extension dans une vraie
+  application Quarkus (`QuarkusUnitTest`) et exerce `/auth/users/me` avec une
+  clé API signée — il prouve que les ressources sont bien servies et que le
+  header `X-Api-Key` est routé vers smallrye-jwt sans mécanisme custom.
+- `example-app/` : bout en bout côté consommateur, chemin API key et chemin
+  OIDC. **Docker requis** (Dev Services démarre un Keycloak).
 
 ### Composants principaux
 
@@ -110,6 +127,8 @@ application qui affiche des commandes `curl` prêtes à l'emploi.
 | `OIDCSecurityIdentitySupplier` | runtime | Logique d'augmentation OIDC |
 | `JwtSecurityIdentitySupplier` | runtime | Logique d'augmentation API key |
 | `UserResource` / `ApiKeyResource` | runtime | Endpoints REST exposés |
+| `AuthAttributes` | runtime | Noms et valeurs des attributs posés sur l'identité |
+| `AuthExceptionMappers` | runtime | Traduction des erreurs métier en statuts HTTP |
 | `AuthBuildTimeConfig` / `AuthRuntimeConfig` | runtime | Configuration |
 | `AuthModuleProcessor` | deployment | BuildSteps de l'extension |
 
@@ -123,12 +142,39 @@ application qui affiche des commandes `curl` prêtes à l'emploi.
 <dependency>
     <groupId>net.norskel</groupId>
     <artifactId>auth-module</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>0.0.5</version>
 </dependency>
+```
+
+Les versions publiées le sont sur **GitHub Packages** : un tag `x.y.z` déclenche
+le job `deploy` de [`build-deploy.yml`](.github/workflows/build-deploy.yml), qui
+fixe la version Maven au nom du tag puis publie. La liste des versions
+disponibles est donc celle des tags du dépôt. Déclarez aussi le dépôt Maven :
+
+```xml
+<repositories>
+    <repository>
+        <id>github-norskel-auth</id>
+        <url>https://maven.pkg.github.com/Norskel/Norskel-Auth-Module</url>
+    </repository>
+</repositories>
+```
+
+> GitHub Packages exige une authentification même en lecture : ajoutez un
+> `<server>` correspondant dans votre `settings.xml` avec un token porteur du
+> scope `read:packages`.
+
+Pour travailler sur l'extension elle-même, installez-la localement plutôt que de
+consommer une version publiée — la version du dépôt est `1.0.0-SNAPSHOT` :
+
+```bash
+./mvnw install -DskipTests
 ```
 
 L'extension dépend transitivement de :
 
+- `quarkus-arc`
+- `quarkus-rest` et `quarkus-rest-jackson`
 - `quarkus-security`
 - `quarkus-oidc`
 - `quarkus-smallrye-jwt`
@@ -136,6 +182,12 @@ L'extension dépend transitivement de :
 - `quarkus-smallrye-openapi`
 
 Pas besoin de les déclarer explicitement dans le projet consommateur.
+
+> La validation de bean n'est **pas** tirée transitivement : l'extension ne
+> dépend que de `jakarta.validation-api`. Les contraintes portées par
+> `UserEntity` / `ApiKeyEntity` (`@NotBlank`) ne sont donc appliquées que si
+> l'application hôte ajoute `quarkus-hibernate-validator`. Les invariants qui
+> comptent vraiment sont vérifiés dans les services, indépendamment de cela.
 
 ### Génération de la paire de clés (API Keys)
 
@@ -168,6 +220,8 @@ quarkus.oidc.authentication.user-info-required=true
 # === API Keys (signature + vérification) ===
 mp.jwt.verify.publickey.location=classpath:api-token-public.pem
 smallrye.jwt.sign.key.location=api-token-private.pem
+# Indispensable en dev/test, sinon smallrye-jwt attend https://quarkus.io/issuer
+mp.jwt.verify.issuer=norskel-auth
 ```
 
 > ⚠️ `user-info-required=true` est obligatoire : `OIDCSecurityIdentitySupplier`
@@ -192,6 +246,19 @@ smallrye.jwt.sign.key.location=api-token-private.pem
 
 Ces valeurs peuvent être overridées dans `application.properties` si besoin.
 
+> ⚠️ **En dev et en test, épinglez `mp.jwt.verify.issuer` explicitement.** Les
+> valeurs ci-dessus sont produites comme *défauts runtime* ; les Dev Services de
+> smallrye-jwt positionnent l'issuer sur `https://quarkus.io/issuer`, qui gagne,
+> et toute vérification d'API key échoue alors en 401 sans explication. Ajoutez
+> donc dans votre `application.properties` :
+>
+> ```properties
+> mp.jwt.verify.issuer=norskel-auth
+> ```
+>
+> En production le défaut de l'extension s'applique et correspond à ce que
+> `ApiKeyService` signe.
+
 ### Propriétés disponibles
 
 #### Build-time (figées au packaging)
@@ -212,6 +279,7 @@ Ces valeurs peuvent être overridées dans `application.properties` si besoin.
 | `norskel-auth.user.default-role` | `user` | Rôle par défaut des nouveaux utilisateurs |
 | `norskel-auth.user.subject-claim` | `sub` | Claim JWT pour l'identifiant utilisateur |
 | `norskel-auth.user.email-claims` | `email,preferred_username` | Claims essayés pour l'email (ordre = priorité) |
+| `norskel-auth.user.avatar-claims` | `picture,avatar_url` | Claims essayés pour l'URL de l'avatar (ordre = priorité). Aucun claim présent = avatar existant conservé |
 | `norskel-auth.user.roles-claim` | _(vide)_ | Claim JWT pour récupérer les rôles |
 
 ### Exemple complet — production
@@ -267,7 +335,9 @@ public class ProjectResource {
 
 ### Récupérer l'utilisateur courant
 
-L'augmentor attache l'`UserEntity` complet en attribut de `SecurityIdentity`. Vous pouvez l'extraire :
+L'augmentor attache l'`UserEntity` complet en attribut de `SecurityIdentity`.
+Les noms d'attributs sont des constantes de `AuthAttributes` — préférez-les aux
+littéraux :
 
 ```java
 @Path("/api/me")
@@ -278,7 +348,7 @@ public class MeResource {
     @GET
     @Authenticated
     public UserEntity me() {
-        return identity.getAttribute("user");
+        return identity.getAttribute(AuthAttributes.USER);
     }
 }
 ```
@@ -289,21 +359,31 @@ Ou via le service :
 @Inject UserService userService;
 @Inject SecurityIdentity identity;
 
-UUID userId = identity.getAttribute("user_id");
+UUID userId = identity.getAttribute(AuthAttributes.USER_ID);
 UserEntity user = userService.findById(userId);
 ```
+
+> `user` et `user_id` sont présents pour **toutes** les identités augmentées par
+> l'extension, y compris les clés de service. Ils sont en revanche absents si
+> l'application hôte authentifie par un mécanisme que l'extension n'augmente
+> pas : les endpoints de l'extension répondent alors 401.
 
 ### Distinguer la source d'authentification
 
 L'attribut `auth_source` permet de différencier les flux :
 
 ```java
-String source = identity.getAttribute("auth_source"); // "oidc" ou "api-key"
+String source = identity.getAttribute(AuthAttributes.AUTH_SOURCE);
+// "oidc", "api-key" ou "service-api-key"
 
-if ("api-key".equals(source)) {
+if (AuthAttributes.SOURCE_SERVICE_API_KEY.equals(source)) {
     // Logique spécifique aux clients machine
 }
 ```
+
+> Testez `auth_source`, **jamais** l'absence d'utilisateur : un service possède
+> lui aussi un `UserEntity`. Le seul attribut réellement discriminant par son
+> absence est `service_name`.
 
 ### Créer une API key
 
@@ -377,9 +457,12 @@ Les erreurs métier des services sont traduites en statuts HTTP par
 | Exception | Statut | Cas typique |
 |-----------|--------|-------------|
 | `AuthNotFoundException` | `404` | User ou clé API inexistant |
-| `AuthValidationException` | `400` | TTL absent ou non positif |
-| `AuthConflictException` | `409` | Username/oidcId déjà pris, clé pour un user banni |
-| `AuthForbiddenException` | `403` | Révocation d'une clé dont on n'est pas propriétaire |
+| `AuthValidationException` | `400` | TTL absent ou non positif, champ manquant ou interdit pour le type du user |
+| `AuthConflictException` | `409` | Username/oidcId déjà pris, clé pour un user banni, service existant avec un autre rôle |
+| `AuthForbiddenException` | `403` | Révocation d'une clé dont on n'est pas propriétaire, écriture sur `/me` par une identité de service |
+
+Le champ `error` du corps vaut respectivement `not_found`, `invalid_request`,
+`conflict` et `forbidden`.
 
 Ces exceptions étendent respectivement `NoSuchElementException`,
 `IllegalArgumentException`, `IllegalStateException` et `SecurityException`. Une
@@ -568,7 +651,13 @@ Règles par type, vérifiées à la création :
 | `username` | requis | requis (et unique) |
 | `email` | requis | doit être absent |
 | `oidc_id` | requis | doit être absent |
-| `role` | optionnel (défaut configuré) | requis |
+| `role` | optionnel | requis |
+
+> Pour un `HUMAN`, un `role` omis n'est **pas** remplacé par
+> `norskel-auth.user.default-role` : la ligne est créée avec un rôle `null`. Ce
+> défaut n'intervient qu'à l'auto-création OIDC, et à la construction de
+> l'identité OIDC en repli. Une clé API portée par un user sans rôle produit
+> donc une identité authentifiée mais sans aucun rôle.
 
 Un login OIDC dont le `preferred_username` correspond à un service existant est
 **refusé** (409) : les usernames viennent de l'IDP, qu'on ne contrôle pas, et une

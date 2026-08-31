@@ -80,8 +80,11 @@ public interface ApiKeyService {
     }
 
     /**
-     * Revokes a key regardless of ownership. This is the only way to revoke a
-     * service key, which by definition has no owning user to authorise as.
+     * Revokes a key regardless of ownership, for an administrator acting on
+     * someone else's key. A service key is owned by its {@code SERVICE} user
+     * like any other, but that user never calls in to revoke its own keys, so
+     * this is in practice the only way to revoke one individually — the other
+     * being to block the service row, which disables all of them.
      */
     void revokeAsAdmin(UUID apiKey);
 

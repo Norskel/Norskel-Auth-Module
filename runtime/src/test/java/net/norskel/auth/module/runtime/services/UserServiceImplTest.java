@@ -158,6 +158,54 @@ class UserServiceImplTest {
         verify(userStore, never()).update(any());
     }
 
+    @Test
+    void upsertFromOidc_storesAvatarOnCreate() {
+        when(userStore.findByOidcId("sub-5")).thenReturn(Optional.empty());
+        when(userStore.persist(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        UserEntity result = service.upsertFromOidc(
+                "sub-5", "mail@test.com", "Erin", "https://idp/erin.png");
+
+        assertEquals("https://idp/erin.png", result.getAvatarUrl());
+    }
+
+    @Test
+    void upsertFromOidc_syncsAvatarWhenChanged() {
+        UserEntity existing = new UserEntity();
+        existing.setId(UUID.randomUUID());
+        existing.setOidcId("sub-6");
+        existing.setEmail("frank@test.com");
+        existing.setUsername("Frank");
+        existing.setAvatarUrl("https://idp/old.png");
+        when(userStore.findByOidcId("sub-6")).thenReturn(Optional.of(existing));
+        when(userStore.update(existing)).thenReturn(existing);
+
+        service.upsertFromOidc("sub-6", "frank@test.com", "Frank", "https://idp/new.png");
+
+        verify(userStore).update(existing);
+        assertEquals("https://idp/new.png", existing.getAvatarUrl());
+    }
+
+    /**
+     * A provider that stops sending the picture claim must not wipe the avatar we
+     * already have — same rule as the email.
+     */
+    @Test
+    void upsertFromOidc_keepsAvatarWhenClaimAbsent() {
+        UserEntity existing = new UserEntity();
+        existing.setId(UUID.randomUUID());
+        existing.setOidcId("sub-7");
+        existing.setEmail("gina@test.com");
+        existing.setUsername("Gina");
+        existing.setAvatarUrl("https://idp/gina.png");
+        when(userStore.findByOidcId("sub-7")).thenReturn(Optional.of(existing));
+
+        service.upsertFromOidc("sub-7", "gina@test.com", "Gina", null);
+
+        verify(userStore, never()).update(any());
+        assertEquals("https://idp/gina.png", existing.getAvatarUrl());
+    }
+
     // --- create ---
 
     @Test

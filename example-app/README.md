@@ -21,13 +21,16 @@ Depuis la **racine du dépôt** (l'exemple dépend de l'extension, qui doit êtr
 construite d'abord) :
 
 ```bash
-# Option 1 — jar packagé (fonctionne avec Maven 3.6+)
-mvn package -DskipTests
+# Option 1 — jar packagé
+./mvnw package -DskipTests
 java -jar example-app/target/quarkus-app/quarkus-run.jar
 
-# Option 2 — live reload (nécessite Maven >= 3.9)
-mvn quarkus:dev -pl :auth-module-example-app
+# Option 2 — live reload
+./mvnw quarkus:dev -pl :auth-module-example-app
 ```
+
+Utilisez le wrapper (`./mvnw`, Maven 3.9.11) : `quarkus:dev` sur un module d'un
+build multi-modules exige Maven >= 3.9.
 
 ### OIDC selon le profil
 
@@ -157,7 +160,7 @@ service, ce qui lui permettrait aussi de créer d'autres services.
 ## Tests
 
 ```bash
-mvn verify          # depuis la racine
+./mvnw verify       # depuis la racine
 ```
 
 `ExampleAppTest` couvre le chemin clé API, `OidcFlowTest` couvre le chemin OIDC

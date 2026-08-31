@@ -46,6 +46,8 @@ class OIDCSecurityIdentitySupplierTest {
         lenient().when(config.user().subjectClaim()).thenReturn("sub");
         lenient().when(config.user().emailClaims())
                 .thenReturn(List.of("email", "preferred_username"));
+        lenient().when(config.user().avatarClaims())
+                .thenReturn(List.of("picture", "avatar_url"));
         lenient().when(config.user().rolesClaim()).thenReturn(Optional.empty());
     }
 
@@ -54,7 +56,7 @@ class OIDCSecurityIdentitySupplierTest {
         doReturn(null).when(identity).getAttribute("userinfo");
 
         assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
-        verify(userService, never()).upsertFromOidc(any(), any(), any());
+        verify(userService, never()).upsertFromOidc(any(), any(), any(), any());
     }
 
     @Test
@@ -64,7 +66,7 @@ class OIDCSecurityIdentitySupplierTest {
         doReturn(userInfo).when(identity).getAttribute("userinfo");
 
         assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
-        verify(userService, never()).upsertFromOidc(any(), any(), any());
+        verify(userService, never()).upsertFromOidc(any(), any(), any(), any());
     }
 
     @Test
@@ -74,7 +76,7 @@ class OIDCSecurityIdentitySupplierTest {
         doReturn(userInfo).when(identity).getAttribute("userinfo");
 
         assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
-        verify(userService, never()).upsertFromOidc(any(), any(), any());
+        verify(userService, never()).upsertFromOidc(any(), any(), any(), any());
     }
 
     @Test
@@ -84,7 +86,7 @@ class OIDCSecurityIdentitySupplierTest {
         when(userInfo.getString("email")).thenReturn("user@test.com");
         when(userInfo.getString("preferred_username")).thenReturn("testuser");
         doReturn(userInfo).when(identity).getAttribute("userinfo");
-        when(userService.upsertFromOidc(any(), any(), any()))
+        when(userService.upsertFromOidc(any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("DB error"));
 
         assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
@@ -101,27 +103,9 @@ class OIDCSecurityIdentitySupplierTest {
         UserEntity blocked = new UserEntity();
         blocked.setId(UUID.randomUUID());
         blocked.setState(UserStateEnum.BLOCKED);
-        when(userService.upsertFromOidc(any(), any(), any())).thenReturn(blocked);
+        when(userService.upsertFromOidc(any(), any(), any(), any())).thenReturn(blocked);
 
         assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
-        verify(userService, never()).updateLastLogin(any());
-    }
-
-    @Test
-    void get_updatesLastLoginForActiveUser() {
-        UserInfo userInfo = mock(UserInfo.class);
-        when(userInfo.getString("sub")).thenReturn("sub-active");
-        when(userInfo.getString("email")).thenReturn("active@test.com");
-        when(userInfo.getString("preferred_username")).thenReturn("active-user");
-        doReturn(userInfo).when(identity).getAttribute("userinfo");
-
-        UserEntity user = buildActiveUser("user");
-        when(userService.upsertFromOidc(any(), any(), any())).thenReturn(user);
-        stubIdentityForBuilder();
-
-        supplier.augment(identity);
-
-        verify(userService).updateLastLogin(user);
     }
 
     @Test
@@ -135,7 +119,7 @@ class OIDCSecurityIdentitySupplierTest {
         UUID userId = UUID.randomUUID();
         UserEntity user = buildActiveUser("editor");
         user.setId(userId);
-        when(userService.upsertFromOidc(any(), any(), any())).thenReturn(user);
+        when(userService.upsertFromOidc(any(), any(), any(), any())).thenReturn(user);
         stubIdentityForBuilder();
 
         SecurityIdentity result = supplier.augment(identity);
@@ -155,12 +139,12 @@ class OIDCSecurityIdentitySupplierTest {
         doReturn(userInfo).when(identity).getAttribute("userinfo");
 
         UserEntity user = buildActiveUser("user");
-        when(userService.upsertFromOidc("sub-1", "user@test.com", "pref-name")).thenReturn(user);
+        when(userService.upsertFromOidc("sub-1", "user@test.com", "pref-name", null)).thenReturn(user);
         stubIdentityForBuilder();
 
         supplier.augment(identity);
 
-        verify(userService).upsertFromOidc("sub-1", "user@test.com", "pref-name");
+        verify(userService).upsertFromOidc("sub-1", "user@test.com", "pref-name", null);
     }
 
     @Test
@@ -173,12 +157,92 @@ class OIDCSecurityIdentitySupplierTest {
         doReturn(userInfo).when(identity).getAttribute("userinfo");
 
         UserEntity user = buildActiveUser("user");
-        when(userService.upsertFromOidc("sub-2", "user@test.com", "nick-name")).thenReturn(user);
+        when(userService.upsertFromOidc("sub-2", "user@test.com", "nick-name", null)).thenReturn(user);
         stubIdentityForBuilder();
 
         supplier.augment(identity);
 
-        verify(userService).upsertFromOidc("sub-2", "user@test.com", "nick-name");
+        verify(userService).upsertFromOidc("sub-2", "user@test.com", "nick-name", null);
+    }
+
+    @Test
+    void get_passesPictureClaimAsAvatar() {
+        UserInfo userInfo = mock(UserInfo.class);
+        when(userInfo.getString("sub")).thenReturn("sub-3");
+        when(userInfo.getString("email")).thenReturn("user@test.com");
+        when(userInfo.getString("preferred_username")).thenReturn("pic-user");
+        lenient().when(userInfo.getString("picture")).thenReturn("https://idp/avatar.png");
+        doReturn(userInfo).when(identity).getAttribute("userinfo");
+
+        UserEntity user = buildActiveUser("user");
+        when(userService.upsertFromOidc("sub-3", "user@test.com", "pic-user",
+                "https://idp/avatar.png")).thenReturn(user);
+        stubIdentityForBuilder();
+
+        supplier.augment(identity);
+
+        verify(userService).upsertFromOidc("sub-3", "user@test.com", "pic-user",
+                "https://idp/avatar.png");
+    }
+
+    @Test
+    void get_fallsBackToAvatarUrlClaimWhenPictureAbsent() {
+        UserInfo userInfo = mock(UserInfo.class);
+        when(userInfo.getString("sub")).thenReturn("sub-4");
+        when(userInfo.getString("email")).thenReturn("user@test.com");
+        when(userInfo.getString("preferred_username")).thenReturn("gitlab-user");
+        lenient().when(userInfo.getString("picture")).thenReturn("  ");
+        lenient().when(userInfo.getString("avatar_url")).thenReturn("https://gitlab/avatar.png");
+        doReturn(userInfo).when(identity).getAttribute("userinfo");
+
+        UserEntity user = buildActiveUser("user");
+        when(userService.upsertFromOidc("sub-4", "user@test.com", "gitlab-user",
+                "https://gitlab/avatar.png")).thenReturn(user);
+        stubIdentityForBuilder();
+
+        supplier.augment(identity);
+
+        verify(userService).upsertFromOidc("sub-4", "user@test.com", "gitlab-user",
+                "https://gitlab/avatar.png");
+    }
+
+    @Test
+    void get_passesNullAvatarWhenProviderSendsNoPictureClaim() {
+        UserInfo userInfo = mock(UserInfo.class);
+        when(userInfo.getString("sub")).thenReturn("sub-5");
+        when(userInfo.getString("email")).thenReturn("user@test.com");
+        when(userInfo.getString("preferred_username")).thenReturn("no-pic-user");
+        doReturn(userInfo).when(identity).getAttribute("userinfo");
+
+        UserEntity user = buildActiveUser("user");
+        when(userService.upsertFromOidc("sub-5", "user@test.com", "no-pic-user", null))
+                .thenReturn(user);
+        stubIdentityForBuilder();
+
+        supplier.augment(identity);
+
+        verify(userService).upsertFromOidc("sub-5", "user@test.com", "no-pic-user", null);
+    }
+
+    @Test
+    void get_survivesAnAvatarClaimThatIsNotAString() {
+        UserInfo userInfo = mock(UserInfo.class);
+        when(userInfo.getString("sub")).thenReturn("sub-6");
+        when(userInfo.getString("email")).thenReturn("user@test.com");
+        when(userInfo.getString("preferred_username")).thenReturn("odd-pic-user");
+        lenient().when(userInfo.getString("picture")).thenThrow(new ClassCastException("not a string"));
+        lenient().when(userInfo.getString("avatar_url")).thenReturn("https://idp/fallback.png");
+        doReturn(userInfo).when(identity).getAttribute("userinfo");
+
+        UserEntity user = buildActiveUser("user");
+        when(userService.upsertFromOidc("sub-6", "user@test.com", "odd-pic-user",
+                "https://idp/fallback.png")).thenReturn(user);
+        stubIdentityForBuilder();
+
+        supplier.augment(identity);
+
+        verify(userService).upsertFromOidc("sub-6", "user@test.com", "odd-pic-user",
+                "https://idp/fallback.png");
     }
 
     // --- helpers ---

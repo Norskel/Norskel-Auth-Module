@@ -4,19 +4,20 @@ package net.norskel.auth.module.runtime;
  * AuthAttributes
  *
  * <p>Names of the attributes this extension puts on the {@code SecurityIdentity},
- * and the values it uses for {@link #AUTH_SOURCE}. Application code should branch
- * on these rather than on string literals, because a service API key produces an
- * identity with no {@link #USER_ID} at all.
+ * and the values it uses for {@link #AUTH_SOURCE}. A service is a user row of
+ * type {@code SERVICE}, so every augmented identity carries a {@link #USER_ID}:
+ * application code that wants to tell machines from people must branch on
+ * {@link #AUTH_SOURCE}, never on the absence of a user.
  *
  * @author Norskel
  * @since 21.08.2026
  **/
 public final class AuthAttributes {
 
-    /** Owning user id. Absent for service API keys. */
+    /** Owning user id. Set on every identity this extension augments. */
     public static final String USER_ID = "user_id";
 
-    /** The resolved {@code UserEntity}. Absent for service API keys. */
+    /** The resolved {@code UserEntity}. Set on every identity this extension augments. */
     public static final String USER = "user";
 
     /** Which mechanism produced the identity; one of the {@code SOURCE_*} values. */

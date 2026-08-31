@@ -59,13 +59,14 @@ public class OIDCSecurityIdentitySupplier {
                 userInfo.getString("nickname"),
                 userInfo.getString("name"),
                 email);
+        String avatarUrl = resolveAvatar(userInfo);
 
         log.debug("[OIDC] Resolving user sub={} email={}", subject, email);
 
         // 2. Upsert en base
         UserEntity user;
         try {
-            user = userService.upsertFromOidc(subject, email, name);
+            user = userService.upsertFromOidc(subject, email, name, avatarUrl);
         } catch (Exception e) {
             log.error("[OIDC] Failed to upsert user from OIDC", e);
             throw new AuthenticationFailedException("User sync failed", e);
@@ -100,13 +101,40 @@ public class OIDCSecurityIdentitySupplier {
 
     /** First non-blank value among the configured email claims. */
     private String resolveEmail(UserInfo userInfo) {
-        for (String claim : config.user().emailClaims()) {
-            String value = userInfo.getString(claim.trim());
+        return firstClaim(userInfo, config.user().emailClaims());
+    }
+
+    /**
+     * First non-blank value among the configured avatar claims.
+     *
+     * <p>{@code null} when the provider sends none: an absent claim leaves the
+     * stored avatar alone rather than clearing it.
+     */
+    private String resolveAvatar(UserInfo userInfo) {
+        return firstClaim(userInfo, config.user().avatarClaims());
+    }
+
+    /** First non-blank string claim among {@code claims}, {@code null} if none. */
+    private static String firstClaim(UserInfo userInfo, List<String> claims) {
+        for (String claim : claims) {
+            String value = safeString(userInfo, claim.trim());
             if (value != null && !value.isBlank()) {
                 return value;
             }
         }
         return null;
+    }
+
+    /**
+     * {@code getString} without the throw: a provider may send a claim as an
+     * object (a nested {@code picture}, say), and that must not fail the login.
+     */
+    private static String safeString(UserInfo userInfo, String claim) {
+        try {
+            return userInfo.getString(claim);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /** Roles read from the optional configured roles claim (array or delimited string). */

@@ -43,22 +43,28 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserEntity upsertFromOidc(String subject, Object email, Object name) {
+        return upsertFromOidc(subject, email, name, null);
+    }
+
+    @Override
+    public UserEntity upsertFromOidc(String subject, Object email, Object name, Object avatarUrl) {
         Objects.requireNonNull(subject);
         String emailStr = email != null ? email.toString() : null;
         String nameStr = name != null ? name.toString() : null;
+        String avatarStr = avatarUrl != null ? avatarUrl.toString() : null;
 
         return userStore.findByOidcId(subject)
-                .map(existing -> syncIfChanged(existing, emailStr, nameStr))
+                .map(existing -> syncIfChanged(existing, emailStr, nameStr, avatarStr))
                 .orElseGet(() -> {
                     if (!config.user().autoCreateOnOidc()) {
                         throw new AuthNotFoundException(
                                 "Unknown OIDC user and auto-create is disabled: " + subject);
                     }
-                    return createFromOidc(subject, emailStr, nameStr);
+                    return createFromOidc(subject, emailStr, nameStr, avatarStr);
                 });
     }
 
-    private UserEntity syncIfChanged(UserEntity user, String email, String name) {
+    private UserEntity syncIfChanged(UserEntity user, String email, String name, String avatarUrl) {
         boolean changed = false;
         if (email != null && !email.equals(user.getEmail())) {
             user.setEmail(email); changed = true;
@@ -69,10 +75,15 @@ public class UserServiceImpl implements UserService {
             assertNoServiceCollision(name, user.getId());
             user.setUsername(name); changed = true;
         }
+        if (avatarUrl != null && !avatarUrl.equals(user.getAvatarUrl())) {
+            // The provider is authoritative on the avatar exactly as it is on the
+            // email: a picture changed there must show up here on the next login.
+            user.setAvatarUrl(avatarUrl); changed = true;
+        }
         return changed ? userStore.update(user) : user;
     }
 
-    private UserEntity createFromOidc(String subject, String email, String name) {
+    private UserEntity createFromOidc(String subject, String email, String name, String avatarUrl) {
         assertNoServiceCollision(name, null);
 
         UserEntity u = new UserEntity();
@@ -82,6 +93,7 @@ public class UserServiceImpl implements UserService {
         u.setOidcId(subject);
         u.setEmail(email);
         u.setUsername(name);
+        u.setAvatarUrl(avatarUrl);
         u.setRole(this.config.user().defaultRole());
         u.setCreatedAt(OffsetDateTime.now());
         u.setLastLogin(OffsetDateTime.now());

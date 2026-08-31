@@ -18,6 +18,20 @@ public interface UserService {
 
     UserEntity upsertFromOidc(String subject, Object email, Object name);
 
+    /**
+     * As {@link #upsertFromOidc(String, Object, Object)}, also syncing the avatar
+     * URL read from the identity provider.
+     *
+     * <p>Defaulted so existing implementations keep compiling; override it to
+     * store the avatar, since the default drops it.
+     *
+     * @param avatarUrl {@code null} when the provider sent no avatar claim, which
+     *                  must leave the stored avatar untouched rather than clear it.
+     */
+    default UserEntity upsertFromOidc(String subject, Object email, Object name, Object avatarUrl) {
+        return upsertFromOidc(subject, email, name);
+    }
+
     UserEntity create(UserEntity userEntity);
 
     UserEntity findByOidcId(String oidcId);
