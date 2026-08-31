@@ -20,18 +20,18 @@
         <maven.deploy.skip>true</maven.deploy.skip>
     </properties>
 
-    <repositories>
-        <repository>
-            <id>github-norskel-auth</id>
-            <url>https://maven.pkg.github.com/Norskel/Norskel-Auth-Module</url>
-        </repository>
-    </repositories>
+<!--    <repositories>-->
+<!--        <repository>-->
+<!--            <id>github-norskel-auth</id>-->
+<!--            <url>https://maven.pkg.github.com/Norskel/Norskel-Auth-Module</url>-->
+<!--        </repository>-->
+<!--    </repositories>-->
 
     <dependencies>
         <dependency>
             <groupId>net.norskel</groupId>
             <artifactId>auth-module</artifactId>
-            <version>0.0.5</version>
+            <version>${project.version}</version>
         </dependency>
 
         <dependency>
