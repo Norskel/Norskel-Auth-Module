@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.norskel.auth.module.runtime.config.AuthRuntimeConfig;
 import net.norskel.auth.module.runtime.entities.UserEntity;
 import net.norskel.auth.module.runtime.enums.UserStateEnum;
+import net.norskel.auth.module.runtime.roles.ClaimRoleResolver;
 import net.norskel.auth.module.runtime.spi.UserService;
 
 import java.util.ArrayList;
@@ -37,6 +38,9 @@ public class OIDCSecurityIdentitySupplier {
 
     @Inject
     AuthRuntimeConfig config;
+
+    @Inject
+    ClaimRoleResolver claimRoleResolver;
 
     public SecurityIdentity augment(SecurityIdentity identity) {
         // 1. Récupérer les infos utilisateur depuis l'introspection OIDC
@@ -95,6 +99,11 @@ public class OIDCSecurityIdentitySupplier {
 
         // Rôles additionnels issus du token (claim configurable)
         resolveRoles(userInfo).forEach(builder::addRole);
+
+        // Rôles issus des règles nommées role-mapping. Plus riche que le claim ci-dessus, qui
+        // suppose un claim contenant déjà des noms de rôles : ici on mappe la valeur d'un claim
+        // quelconque, avec un filtrage de portée. Sans règle déclarée, ne renvoie rien.
+        claimRoleResolver.rolesFor(userInfo).forEach(builder::addRole);
 
         return builder.build();
     }
