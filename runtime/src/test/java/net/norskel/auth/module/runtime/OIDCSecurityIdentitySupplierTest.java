@@ -53,6 +53,7 @@ class OIDCSecurityIdentitySupplierTest {
         lenient().when(config.user().avatarClaims())
                 .thenReturn(List.of("picture", "avatar_url"));
         lenient().when(config.user().rolesClaim()).thenReturn(Optional.empty());
+        lenient().when(config.user().grantSsoRoles()).thenReturn(true);
         // No role-mapping rule by default, so the existing tests keep asserting what they did.
         lenient().when(claimRoleResolver.rolesFor(any(UserInfo.class))).thenReturn(Set.of());
     }
@@ -62,7 +63,7 @@ class OIDCSecurityIdentitySupplierTest {
         doReturn(null).when(identity).getAttribute("userinfo");
 
         assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
-        verify(userService, never()).upsertFromOidc(any(), any(), any(), any());
+        verify(userService, never()).upsertFromOidc(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -72,7 +73,7 @@ class OIDCSecurityIdentitySupplierTest {
         doReturn(userInfo).when(identity).getAttribute("userinfo");
 
         assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
-        verify(userService, never()).upsertFromOidc(any(), any(), any(), any());
+        verify(userService, never()).upsertFromOidc(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -82,7 +83,7 @@ class OIDCSecurityIdentitySupplierTest {
         doReturn(userInfo).when(identity).getAttribute("userinfo");
 
         assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
-        verify(userService, never()).upsertFromOidc(any(), any(), any(), any());
+        verify(userService, never()).upsertFromOidc(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -92,7 +93,7 @@ class OIDCSecurityIdentitySupplierTest {
         when(userInfo.getString("email")).thenReturn("user@test.com");
         when(userInfo.getString("preferred_username")).thenReturn("testuser");
         doReturn(userInfo).when(identity).getAttribute("userinfo");
-        when(userService.upsertFromOidc(any(), any(), any(), any()))
+        when(userService.upsertFromOidc(any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("DB error"));
 
         assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
@@ -109,7 +110,7 @@ class OIDCSecurityIdentitySupplierTest {
         UserEntity blocked = new UserEntity();
         blocked.setId(UUID.randomUUID());
         blocked.setState(UserStateEnum.BLOCKED);
-        when(userService.upsertFromOidc(any(), any(), any(), any())).thenReturn(blocked);
+        when(userService.upsertFromOidc(any(), any(), any(), any(), any())).thenReturn(blocked);
 
         assertThrows(AuthenticationFailedException.class, () -> supplier.augment(identity));
     }
@@ -125,7 +126,7 @@ class OIDCSecurityIdentitySupplierTest {
         UUID userId = UUID.randomUUID();
         UserEntity user = buildActiveUser("editor");
         user.setId(userId);
-        when(userService.upsertFromOidc(any(), any(), any(), any())).thenReturn(user);
+        when(userService.upsertFromOidc(any(), any(), any(), any(), any())).thenReturn(user);
         stubIdentityForBuilder();
 
         SecurityIdentity result = supplier.augment(identity);
@@ -145,12 +146,12 @@ class OIDCSecurityIdentitySupplierTest {
         doReturn(userInfo).when(identity).getAttribute("userinfo");
 
         UserEntity user = buildActiveUser("user");
-        when(userService.upsertFromOidc("sub-1", "user@test.com", "pref-name", null)).thenReturn(user);
+        when(userService.upsertFromOidc("sub-1", "user@test.com", "pref-name", null, Set.of())).thenReturn(user);
         stubIdentityForBuilder();
 
         supplier.augment(identity);
 
-        verify(userService).upsertFromOidc("sub-1", "user@test.com", "pref-name", null);
+        verify(userService).upsertFromOidc("sub-1", "user@test.com", "pref-name", null, Set.of());
     }
 
     @Test
@@ -163,12 +164,12 @@ class OIDCSecurityIdentitySupplierTest {
         doReturn(userInfo).when(identity).getAttribute("userinfo");
 
         UserEntity user = buildActiveUser("user");
-        when(userService.upsertFromOidc("sub-2", "user@test.com", "nick-name", null)).thenReturn(user);
+        when(userService.upsertFromOidc("sub-2", "user@test.com", "nick-name", null, Set.of())).thenReturn(user);
         stubIdentityForBuilder();
 
         supplier.augment(identity);
 
-        verify(userService).upsertFromOidc("sub-2", "user@test.com", "nick-name", null);
+        verify(userService).upsertFromOidc("sub-2", "user@test.com", "nick-name", null, Set.of());
     }
 
     @Test
@@ -182,13 +183,13 @@ class OIDCSecurityIdentitySupplierTest {
 
         UserEntity user = buildActiveUser("user");
         when(userService.upsertFromOidc("sub-3", "user@test.com", "pic-user",
-                "https://idp/avatar.png")).thenReturn(user);
+                "https://idp/avatar.png", Set.of())).thenReturn(user);
         stubIdentityForBuilder();
 
         supplier.augment(identity);
 
         verify(userService).upsertFromOidc("sub-3", "user@test.com", "pic-user",
-                "https://idp/avatar.png");
+                "https://idp/avatar.png", Set.of());
     }
 
     @Test
@@ -203,13 +204,13 @@ class OIDCSecurityIdentitySupplierTest {
 
         UserEntity user = buildActiveUser("user");
         when(userService.upsertFromOidc("sub-4", "user@test.com", "gitlab-user",
-                "https://gitlab/avatar.png")).thenReturn(user);
+                "https://gitlab/avatar.png", Set.of())).thenReturn(user);
         stubIdentityForBuilder();
 
         supplier.augment(identity);
 
         verify(userService).upsertFromOidc("sub-4", "user@test.com", "gitlab-user",
-                "https://gitlab/avatar.png");
+                "https://gitlab/avatar.png", Set.of());
     }
 
     @Test
@@ -221,13 +222,13 @@ class OIDCSecurityIdentitySupplierTest {
         doReturn(userInfo).when(identity).getAttribute("userinfo");
 
         UserEntity user = buildActiveUser("user");
-        when(userService.upsertFromOidc("sub-5", "user@test.com", "no-pic-user", null))
+        when(userService.upsertFromOidc("sub-5", "user@test.com", "no-pic-user", null, Set.of()))
                 .thenReturn(user);
         stubIdentityForBuilder();
 
         supplier.augment(identity);
 
-        verify(userService).upsertFromOidc("sub-5", "user@test.com", "no-pic-user", null);
+        verify(userService).upsertFromOidc("sub-5", "user@test.com", "no-pic-user", null, Set.of());
     }
 
     @Test
@@ -242,13 +243,70 @@ class OIDCSecurityIdentitySupplierTest {
 
         UserEntity user = buildActiveUser("user");
         when(userService.upsertFromOidc("sub-6", "user@test.com", "odd-pic-user",
-                "https://idp/fallback.png")).thenReturn(user);
+                "https://idp/fallback.png", Set.of())).thenReturn(user);
         stubIdentityForBuilder();
 
         supplier.augment(identity);
 
         verify(userService).upsertFromOidc("sub-6", "user@test.com", "odd-pic-user",
-                "https://idp/fallback.png");
+                "https://idp/fallback.png", Set.of());
+    }
+
+    /**
+     * The upsert decides the stored role from what the provider granted, so it has to
+     * receive the roles claim and the role-mapping rules together — either source
+     * alone would understate the person's privileges.
+     */
+    @Test
+    void get_passesEveryRoleTheProviderGrantedToTheUpsert() {
+        UserInfo userInfo = mock(UserInfo.class);
+        when(userInfo.getString("sub")).thenReturn("sub-7");
+        when(userInfo.getString("email")).thenReturn("user@test.com");
+        when(userInfo.getString("preferred_username")).thenReturn("role-user");
+        when(config.user().rolesClaim()).thenReturn(Optional.of("groups"));
+        when(userInfo.contains("groups")).thenReturn(true);
+        // Le claim arrive en chaîne : getArray échoue, resolveRoles retombe sur getString.
+        lenient().when(userInfo.getArray("groups"))
+                .thenThrow(new ClassCastException("not an array"));
+        lenient().when(userInfo.getString("groups")).thenReturn("admin");
+        when(claimRoleResolver.rolesFor(userInfo)).thenReturn(Set.of("owner"));
+        doReturn(userInfo).when(identity).getAttribute("userinfo");
+
+        UserEntity user = buildActiveUser("admin");
+        when(userService.upsertFromOidc(any(), any(), any(), any(), any())).thenReturn(user);
+        stubIdentityForBuilder();
+
+        SecurityIdentity result = supplier.augment(identity);
+
+        verify(userService).upsertFromOidc("sub-7", "user@test.com", "role-user", null,
+                Set.of("admin", "owner"));
+        assertTrue(result.getRoles().containsAll(Set.of("admin", "owner")));
+    }
+
+    /**
+     * With the grant switched off the provider's roles still reach the upsert — they
+     * decide the stored role — but none of them is granted: authorization then rests
+     * on the stored role alone.
+     */
+    @Test
+    void get_withoutTheGrant_usesSsoRolesForTheUpsertOnly() {
+        UserInfo userInfo = mock(UserInfo.class);
+        when(userInfo.getString("sub")).thenReturn("sub-8");
+        when(userInfo.getString("email")).thenReturn("user@test.com");
+        when(userInfo.getString("preferred_username")).thenReturn("closed-set-user");
+        when(config.user().grantSsoRoles()).thenReturn(false);
+        when(claimRoleResolver.rolesFor(userInfo)).thenReturn(Set.of("gitlab-group-owner"));
+        doReturn(userInfo).when(identity).getAttribute("userinfo");
+
+        UserEntity user = buildActiveUser("admin");
+        when(userService.upsertFromOidc(any(), any(), any(), any(), any())).thenReturn(user);
+        stubIdentityForBuilder();
+
+        SecurityIdentity result = supplier.augment(identity);
+
+        verify(userService).upsertFromOidc("sub-8", "user@test.com", "closed-set-user", null,
+                Set.of("gitlab-group-owner"));
+        assertEquals(Set.of("admin"), result.getRoles());
     }
 
     // --- helpers ---

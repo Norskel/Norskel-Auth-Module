@@ -281,6 +281,54 @@ Ces valeurs peuvent être overridées dans `application.properties` si besoin.
 | `norskel-auth.user.email-claims` | `email,preferred_username` | Claims essayés pour l'email (ordre = priorité) |
 | `norskel-auth.user.avatar-claims` | `picture,avatar_url` | Claims essayés pour l'URL de l'avatar (ordre = priorité). Aucun claim présent = avatar existant conservé |
 | `norskel-auth.user.roles-claim` | _(vide)_ | Claim JWT pour récupérer les rôles |
+| `norskel-auth.user.grant-sso-roles` | `true` | Ajoute les rôles du token (claim `roles-claim` et règles `role-mapping`) à l'identité de la requête. `false` = ils ne servent qu'à décider du rôle en base (voir ci-dessous) |
+| `norskel-auth.user.db-role-from-sso` | _(vide)_ | Rôles, par priorité décroissante, dont le SSO est maître dans le champ `role` de l'utilisateur (voir ci-dessous). Vide = le rôle en base n'est jamais modifié après la création |
+
+### Rôle en base piloté par le SSO
+
+Par défaut, le champ `role` de l'utilisateur est écrit une seule fois, à la création
+(`default-role`), et les rôles venant du SSO ne vivent que dans la `SecurityIdentity`
+de la requête. `db-role-from-sso` change cela pour les rôles qu'il nomme :
+
+```properties
+norskel-auth.user.roles-claim=groups
+norskel-auth.user.db-role-from-sso=admin,manager
+```
+
+À chaque login OIDC, l'upsert regarde les rôles accordés par le SSO (le claim
+`roles-claim` **et** les règles `role-mapping`) et :
+
+- accorde `admin` en base si le SSO le donne ; `manager` sinon. Le premier de la
+  liste gagne, car l'entité ne porte qu'un rôle : l'arbitrage doit être explicite
+  et non dépendre de l'ordre des claims ;
+- ramène l'utilisateur à `default-role` si le SSO ne lui donne plus aucun de ces
+  rôles — un privilège révoqué chez l'IdP ne doit pas survivre en base ;
+- ne touche jamais un rôle absent de la liste (`auditor`, un rôle posé à la main
+  via `PUT /auth/users/{id}`…) : celui-ci ne relève pas du SSO.
+
+Les rôles SSO hors de cette liste continuent d'être ajoutés à l'identité de la
+requête ; seule leur écriture en base est concernée.
+
+#### Jeu de rôles fermé (`grant-sso-roles=false`)
+
+Pour que les rôles du SSO servent **uniquement** à décider du rôle en base, sans
+être accordés tels quels :
+
+```properties
+norskel-auth.user.roles-claim=groups
+norskel-auth.user.grant-sso-roles=false
+norskel-auth.user.db-role-from-sso=admin,manager
+norskel-auth.user.default-role=user
+```
+
+Quelqu'un dont le token porte `groups=["admin", "gitlab-group-owner"]` obtient
+l'identité `[admin]` : le rôle en base, dérivé du SSO, et rien d'autre —
+`gitlab-group-owner` a servi à la décision sans devenir un rôle. Les
+`@RolesAllowed` de l'application ne dépendent donc que du jeu de rôles que tu
+maîtrises, pas du nommage des groupes côté IdP.
+
+Sans `db-role-from-sso`, ce drapeau à `false` coupe toute influence du SSO sur les
+rôles : chacun n'obtient que le rôle inscrit en base.
 
 ### Exemple complet — production
 

@@ -17,8 +17,10 @@ import net.norskel.auth.module.runtime.roles.ClaimRoleResolver;
 import net.norskel.auth.module.runtime.spi.UserService;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * OIDCSecurityIdentitySupplier
@@ -67,26 +69,30 @@ public class OIDCSecurityIdentitySupplier {
 
         log.debug("[OIDC] Resolving user sub={} email={}", subject, email);
 
-        // 2. Upsert en base
+
+        Set<String> ssoRoles = new LinkedHashSet<>(resolveRoles(userInfo));
+        ssoRoles.addAll(claimRoleResolver.rolesFor(userInfo));
+
+        // 3. Upsert en base
         UserEntity user;
         try {
-            user = userService.upsertFromOidc(subject, email, name, avatarUrl);
+            user = userService.upsertFromOidc(subject, email, name, avatarUrl, ssoRoles);
         } catch (Exception e) {
             log.error("[OIDC] Failed to upsert user from OIDC", e);
             throw new AuthenticationFailedException("User sync failed", e);
         }
 
-        // 3. Vérifier l'état
+        // 4. Vérifier l'état
         if (user.getState() == UserStateEnum.BLOCKED) {
             log.warn("[OIDC] Rejected banned user sub={} userId={}",
                     subject, user.getId());
             throw new AuthenticationFailedException("User is banned");
         }
 
-        // 4. Mise à jour optionnelle du lastLogin (avec throttle)
+        // 5. Mise à jour optionnelle du lastLogin (avec throttle)
         userService.updateLastLogin(user);
 
-        // 5. Construire l'identité enrichie
+        // 6. Construire l'identité enrichie
         String role = user.getRole() != null
                 ? user.getRole()
                 : config.user().defaultRole();
@@ -97,13 +103,15 @@ public class OIDCSecurityIdentitySupplier {
                 .addAttribute(AuthAttributes.USER, user)
                 .addAttribute(AuthAttributes.AUTH_SOURCE, AuthAttributes.SOURCE_OIDC);
 
-        // Rôles additionnels issus du token (claim configurable)
-        resolveRoles(userInfo).forEach(builder::addRole);
-
-        // Rôles issus des règles nommées role-mapping. Plus riche que le claim ci-dessus, qui
-        // suppose un claim contenant déjà des noms de rôles : ici on mappe la valeur d'un claim
-        // quelconque, avec un filtrage de portée. Sans règle déclarée, ne renvoie rien.
-        claimRoleResolver.rolesFor(userInfo).forEach(builder::addRole);
+        // Rôles additionnels issus du token, y compris ceux que le SSO ne pilote pas en base.
+        // Débranchables : les rôles du fournisseur servent alors uniquement à décider du rôle
+        // stocké ci-dessus, et l'autorisation ne dépend plus que de ce dernier.
+        if (config.user().grantSsoRoles()) {
+            ssoRoles.forEach(builder::addRole);
+        } else if (!ssoRoles.isEmpty()) {
+            log.debug("[OIDC] {} SSO role(s) not granted (grant-sso-roles=false), role={}",
+                    ssoRoles.size(), role);
+        }
 
         return builder.build();
     }

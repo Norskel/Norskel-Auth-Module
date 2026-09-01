@@ -19,6 +19,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -204,6 +205,102 @@ class UserServiceImplTest {
 
         verify(userStore, never()).update(any());
         assertEquals("https://idp/gina.png", existing.getAvatarUrl());
+    }
+
+    // --- upsertFromOidc: rôle piloté par le SSO ---
+
+    @Test
+    void upsertFromOidc_forcesTheGovernedRoleGrantedBySso() {
+        when(config.user().dbRoleFromSso()).thenReturn(Optional.of(List.of("admin", "manager")));
+        UserEntity existing = oidcUser("sub-10", "user");
+        when(userStore.findByOidcId("sub-10")).thenReturn(Optional.of(existing));
+        when(userStore.update(existing)).thenReturn(existing);
+
+        service.upsertFromOidc("sub-10", "sub-10@test.com", "sub-10", null, Set.of("manager"));
+
+        verify(userStore).update(existing);
+        assertEquals("manager", existing.getRole());
+    }
+
+    /**
+     * The row holds a single role, so when the provider grants several the winner has
+     * to come from the configured order rather than from the order of the claims.
+     */
+    @Test
+    void upsertFromOidc_prefersTheFirstConfiguredRole_whenSsoGrantsSeveral() {
+        when(config.user().dbRoleFromSso()).thenReturn(Optional.of(List.of("admin", "manager")));
+        UserEntity existing = oidcUser("sub-11", "user");
+        when(userStore.findByOidcId("sub-11")).thenReturn(Optional.of(existing));
+        when(userStore.update(existing)).thenReturn(existing);
+
+        service.upsertFromOidc("sub-11", "sub-11@test.com", "sub-11", null,
+                Set.of("manager", "admin"));
+
+        assertEquals("admin", existing.getRole());
+    }
+
+    /** A privilege revoked at the IdP must not survive in our table. */
+    @Test
+    void upsertFromOidc_dropsToDefaultRole_whenSsoNoLongerGrantsAGovernedRole() {
+        when(config.user().dbRoleFromSso()).thenReturn(Optional.of(List.of("admin", "manager")));
+        UserEntity existing = oidcUser("sub-12", "admin");
+        when(userStore.findByOidcId("sub-12")).thenReturn(Optional.of(existing));
+        when(userStore.update(existing)).thenReturn(existing);
+
+        service.upsertFromOidc("sub-12", "sub-12@test.com", "sub-12", null, Set.of("some-other-role"));
+
+        verify(userStore).update(existing);
+        assertEquals("user", existing.getRole());
+    }
+
+    /**
+     * A role outside the governed list was granted by hand: the provider has no say
+     * over it, and a login must not silently take it away.
+     */
+    @Test
+    void upsertFromOidc_leavesAnUngovernedRoleAlone() {
+        when(config.user().dbRoleFromSso()).thenReturn(Optional.of(List.of("admin")));
+        UserEntity existing = oidcUser("sub-13", "auditor");
+        when(userStore.findByOidcId("sub-13")).thenReturn(Optional.of(existing));
+
+        service.upsertFromOidc("sub-13", "sub-13@test.com", "sub-13", null, Set.of());
+
+        verify(userStore, never()).update(any());
+        assertEquals("auditor", existing.getRole());
+    }
+
+    @Test
+    void upsertFromOidc_appliesTheSsoRoleOnCreate() {
+        when(config.user().dbRoleFromSso()).thenReturn(Optional.of(List.of("admin")));
+        when(userStore.findByOidcId("sub-14")).thenReturn(Optional.empty());
+        when(userStore.persist(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        UserEntity result = service.upsertFromOidc("sub-14", "sub-14@test.com", "sub-14", null,
+                Set.of("admin"));
+
+        assertEquals("admin", result.getRole());
+    }
+
+    /** Unconfigured, the stored role stays exactly as it was — the previous behaviour. */
+    @Test
+    void upsertFromOidc_ignoresSsoRoles_whenNoRoleIsGoverned() {
+        UserEntity existing = oidcUser("sub-15", "user");
+        when(userStore.findByOidcId("sub-15")).thenReturn(Optional.of(existing));
+
+        service.upsertFromOidc("sub-15", "sub-15@test.com", "sub-15", null, Set.of("admin"));
+
+        verify(userStore, never()).update(any());
+        assertEquals("user", existing.getRole());
+    }
+
+    private static UserEntity oidcUser(String oidcId, String role) {
+        UserEntity u = new UserEntity();
+        u.setId(UUID.randomUUID());
+        u.setOidcId(oidcId);
+        u.setEmail(oidcId + "@test.com");
+        u.setUsername(oidcId);
+        u.setRole(role);
+        return u;
     }
 
     // --- create ---

@@ -90,6 +90,42 @@ public interface AuthRuntimeConfig {
         String subjectClaim();
 
         /**
+         * Ajoute les rôles portés par le token à l'identité de la requête.
+         *
+         * <p>À {@code false}, les rôles du fournisseur (claim {@link #rolesClaim()} et règles
+         * {@code role-mapping}) ne sont plus accordés directement : ils servent uniquement à
+         * décider du rôle stocké, via {@link #dbRoleFromSso()}. L'autorisation ne dépend alors
+         * plus que du champ {@code role} de l'utilisateur, ce qui donne un jeu de rôles fermé,
+         * indépendant du nommage des groupes côté IdP.
+         *
+         * <p>Sans {@link #dbRoleFromSso()}, mettre ce drapeau à {@code false} coupe toute
+         * influence du SSO sur les rôles : chacun n'obtient que le rôle inscrit en base.
+         */
+        @WithDefault("true")
+        boolean grantSsoRoles();
+
+        /**
+         * Rôles, par priorité décroissante, dont le SSO est maître en base.
+         *
+         * <p>À chaque login, si l'utilisateur détient l'un de ces rôles côté SSO (claim de rôles
+         * ou règles {@code role-mapping}), il est écrit dans le champ {@code role} de l'utilisateur.
+         * Le premier de la liste gagne : l'entité ne porte qu'un rôle, l'arbitrage entre plusieurs
+         * rôles SSO doit donc être explicite et non dépendre de l'ordre des claims.
+         *
+         * <p>Le SSO est autoritaire dans les deux sens : perdre un rôle de cette liste côté SSO
+         * ramène l'utilisateur à {@link #defaultRole()}, un privilège révoqué chez l'IdP ne devant
+         * pas survivre en base. Un rôle absent de la liste n'est jamais touché : il a été attribué
+         * à la main et ne relève pas du SSO.
+         *
+         * <p>Vide (défaut) : le rôle en base n'est plus jamais modifié après la création.
+         *
+         * <pre>
+         * norskel-auth.user.db-role-from-sso=admin,manager
+         * </pre>
+         */
+        Optional<List<String>> dbRoleFromSso();
+
+        /**
          * Ordre des claims à essayer pour l'email.
          * Premier claim non vide gagné.
          */

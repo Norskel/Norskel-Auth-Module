@@ -3,6 +3,7 @@ package net.norskel.auth.module.runtime.spi;
 import net.norskel.auth.module.runtime.entities.UserEntity;
 import net.norskel.auth.module.runtime.enums.UserTypeEnum;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -30,6 +31,22 @@ public interface UserService {
      */
     default UserEntity upsertFromOidc(String subject, Object email, Object name, Object avatarUrl) {
         return upsertFromOidc(subject, email, name);
+    }
+
+    /**
+     * As {@link #upsertFromOidc(String, Object, Object, Object)}, also deriving the
+     * stored role from the roles the identity provider granted for this login.
+     *
+     * <p>Defaulted so existing implementations keep compiling; the default ignores
+     * {@code ssoRoles}, leaving the stored role as it was.
+     *
+     * @param ssoRoles every role the provider granted, may be empty, never
+     *                 {@code null}. Which of them may reach the row — and with
+     *                 what priority — is a configuration matter, not the caller's.
+     */
+    default UserEntity upsertFromOidc(String subject, Object email, Object name, Object avatarUrl,
+                                      Collection<String> ssoRoles) {
+        return upsertFromOidc(subject, email, name, avatarUrl);
     }
 
     UserEntity create(UserEntity userEntity);

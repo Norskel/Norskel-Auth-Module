@@ -15,9 +15,11 @@ import net.norskel.auth.module.runtime.spi.UserStore;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -48,23 +50,31 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserEntity upsertFromOidc(String subject, Object email, Object name, Object avatarUrl) {
+        return upsertFromOidc(subject, email, name, avatarUrl, Set.of());
+    }
+
+    @Override
+    public UserEntity upsertFromOidc(String subject, Object email, Object name, Object avatarUrl,
+                                     Collection<String> ssoRoles) {
         Objects.requireNonNull(subject);
         String emailStr = email != null ? email.toString() : null;
         String nameStr = name != null ? name.toString() : null;
         String avatarStr = avatarUrl != null ? avatarUrl.toString() : null;
+        Collection<String> roles = ssoRoles != null ? ssoRoles : Set.of();
 
         return userStore.findByOidcId(subject)
-                .map(existing -> syncIfChanged(existing, emailStr, nameStr, avatarStr))
+                .map(existing -> syncIfChanged(existing, emailStr, nameStr, avatarStr, roles))
                 .orElseGet(() -> {
                     if (!config.user().autoCreateOnOidc()) {
                         throw new AuthNotFoundException(
                                 "Unknown OIDC user and auto-create is disabled: " + subject);
                     }
-                    return createFromOidc(subject, emailStr, nameStr, avatarStr);
+                    return createFromOidc(subject, emailStr, nameStr, avatarStr, roles);
                 });
     }
 
-    private UserEntity syncIfChanged(UserEntity user, String email, String name, String avatarUrl) {
+    private UserEntity syncIfChanged(UserEntity user, String email, String name, String avatarUrl,
+                                     Collection<String> ssoRoles) {
         boolean changed = false;
         if (email != null && !email.equals(user.getEmail())) {
             user.setEmail(email); changed = true;
@@ -80,10 +90,45 @@ public class UserServiceImpl implements UserService {
             // email: a picture changed there must show up here on the next login.
             user.setAvatarUrl(avatarUrl); changed = true;
         }
+        String role = roleFromSso(ssoRoles, user.getRole());
+        if (role != null && !role.equals(user.getRole())) {
+            user.setRole(role); changed = true;
+        }
         return changed ? userStore.update(user) : user;
     }
 
-    private UserEntity createFromOidc(String subject, String email, String name, String avatarUrl) {
+    /**
+     * The role the identity provider dictates for this login, {@code null} to leave
+     * the stored one alone.
+     *
+     * <p>Only the roles named in {@code norskel-auth.user.db-role-from-sso} are
+     * governed here, the first of that list winning when the provider granted
+     * several: the row holds a single role, so the arbitration has to be explicit
+     * rather than depend on the order the claims happened to come in.
+     *
+     * <p>Over that list the provider is authoritative in both directions — losing a
+     * governed role there brings the row back to {@link
+     * AuthRuntimeConfig.UserRuntimeConfig#defaultRole()}, since a privilege revoked
+     * at the IdP must not survive in our table. A stored role outside the list is
+     * left untouched: it was granted by hand and is not the provider's to revoke.
+     *
+     * @param currentRole the stored role, {@code null} when creating the row.
+     */
+    private String roleFromSso(Collection<String> ssoRoles, String currentRole) {
+        List<String> governed = config.user().dbRoleFromSso().orElseGet(List::of);
+        if (governed.isEmpty()) {
+            return null;
+        }
+        for (String candidate : governed) {
+            if (ssoRoles.contains(candidate)) {
+                return candidate;
+            }
+        }
+        return governed.contains(currentRole) ? config.user().defaultRole() : null;
+    }
+
+    private UserEntity createFromOidc(String subject, String email, String name, String avatarUrl,
+                                      Collection<String> ssoRoles) {
         assertNoServiceCollision(name, null);
 
         UserEntity u = new UserEntity();
@@ -94,7 +139,8 @@ public class UserServiceImpl implements UserService {
         u.setEmail(email);
         u.setUsername(name);
         u.setAvatarUrl(avatarUrl);
-        u.setRole(this.config.user().defaultRole());
+        String role = roleFromSso(ssoRoles, null);
+        u.setRole(role != null ? role : this.config.user().defaultRole());
         u.setCreatedAt(OffsetDateTime.now());
         u.setLastLogin(OffsetDateTime.now());
         return userStore.persist(u);
