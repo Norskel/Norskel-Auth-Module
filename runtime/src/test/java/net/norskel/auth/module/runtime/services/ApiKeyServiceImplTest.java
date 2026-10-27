@@ -91,6 +91,32 @@ class ApiKeyServiceImplTest {
     }
 
     @Test
+    void check_returnsTrue_whenTheRevokedFlagIsNull() {
+        UUID id = UUID.randomUUID();
+        ApiKeyEntity k = new ApiKeyEntity();
+        k.setRevoked(null);
+        k.setExpiresAt(OffsetDateTime.now().plusDays(10));
+        when(apiKeyStore.findById(id)).thenReturn(Optional.of(k));
+        assertTrue(service.check(id));
+    }
+
+    @Test
+    void revokeAllForUser_revokesKeys_whenTheRevokedFlagIsNull() {
+        UUID userId = UUID.randomUUID();
+        ApiKeyEntity k = new ApiKeyEntity();
+        k.setId(UUID.randomUUID());
+        k.setUserId(userId);
+        k.setRevoked(null);
+        when(apiKeyStore.findByUser(userId)).thenReturn(List.of(k));
+
+        service.revokeAllForUser(userId);
+
+        assertTrue(k.getRevoked());
+        assertNotNull(k.getRevokedAt());
+        verify(apiKeyStore).update(k);
+    }
+
+    @Test
     void check_returnsTrue_forKeyWithNoExpiry() {
         UUID id = UUID.randomUUID();
         ApiKeyEntity k = new ApiKeyEntity();

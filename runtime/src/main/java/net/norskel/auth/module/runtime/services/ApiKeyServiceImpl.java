@@ -181,7 +181,7 @@ public class ApiKeyServiceImpl implements ApiKeyService {
         Objects.requireNonNull(userId, "userId must not be null");
         OffsetDateTime now = OffsetDateTime.now();
         for (ApiKeyEntity key : apiKeyStore.findByUser(userId)) {
-            if (!key.getRevoked()) {
+            if (!Boolean.TRUE.equals(key.getRevoked())) {
                 key.setRevoked(true);
                 key.setRevokedAt(now);
                 apiKeyStore.update(key);
@@ -193,7 +193,8 @@ public class ApiKeyServiceImpl implements ApiKeyService {
     public boolean check(UUID apiKey) {
         if (apiKey == null) return false;
         return apiKeyStore.findById(apiKey)
-                .filter(k -> !k.getRevoked())
+                // A store may hand back a null flag (nullable column): treat it as not revoked
+                .filter(k -> !Boolean.TRUE.equals(k.getRevoked()))
                 .filter(k -> k.getExpiresAt() == null
                         || k.getExpiresAt().isAfter(OffsetDateTime.now()))
                 .isPresent();

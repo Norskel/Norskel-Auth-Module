@@ -128,6 +128,7 @@ un wrapper Maven (3.9.11), inutile d'installer Maven.
 | `JwtSecurityIdentitySupplier` | runtime | Logique d'augmentation API key |
 | `UserResource` / `ApiKeyResource` | runtime | Endpoints REST exposés |
 | `AuthAttributes` | runtime | Noms et valeurs des attributs posés sur l'identité |
+| `CurrentUser` | runtime | Vue typée de l'appelant de la requête (`@RequestScoped`) |
 | `AuthExceptionMappers` | runtime | Traduction des erreurs métier en statuts HTTP |
 | `AuthBuildTimeConfig` / `AuthRuntimeConfig` | runtime | Configuration |
 | `AuthModuleProcessor` | deployment | BuildSteps de l'extension |
@@ -142,7 +143,7 @@ un wrapper Maven (3.9.11), inutile d'installer Maven.
 <dependency>
     <groupId>net.norskel</groupId>
     <artifactId>auth-module</artifactId>
-    <version>0.0.5</version>
+    <version>0.1.0</version>
 </dependency>
 ```
 
@@ -163,6 +164,30 @@ disponibles est donc celle des tags du dépôt. Déclarez aussi le dépôt Maven
 > GitHub Packages exige une authentification même en lecture : ajoutez un
 > `<server>` correspondant dans votre `settings.xml` avec un token porteur du
 > scope `read:packages`.
+
+#### Depuis une CI GitLab
+
+Créez sur GitHub un token (classic) avec le seul scope `read:packages`, puis
+déclarez-le dans le projet GitLab comme variable CI/CD **masquée et protégée**
+(ex. `GITHUB_PACKAGES_TOKEN`, avec `GITHUB_PACKAGES_USER` pour le nom du compte).
+Le `settings.xml` de la CI le lit depuis l'environnement — aucun secret dans le
+dépôt :
+
+```xml
+<servers>
+    <server>
+        <id>github-norskel-auth</id> <!-- même id que le <repository> du pom -->
+        <username>${env.GITHUB_PACKAGES_USER}</username>
+        <password>${env.GITHUB_PACKAGES_TOKEN}</password>
+    </server>
+</servers>
+```
+
+```yaml
+build:
+  script:
+    - mvn -s .gitlab-ci/maven-settings.xml verify
+```
 
 Pour travailler sur l'extension elle-même, installez-la localement plutôt que de
 consommer une version publiée — la version du dépôt est `1.0.0-SNAPSHOT` :
@@ -267,6 +292,7 @@ Ces valeurs peuvent être overridées dans `application.properties` si besoin.
 |----------|--------|-------------|
 | `norskel-auth-build.api-token-header` | `X-Api-Key` | Header HTTP portant la clé API |
 | `norskel-auth-build.api-token-issuer` | `norskel-auth` | Issuer des JWT API keys |
+| `norskel-auth-build.rest-enabled` | `true` | Sert les endpoints `/auth/users` et `/auth/api-keys`. `false` = l'application expose ses propres endpoints au-dessus des services ; l'authentification n'est pas touchée |
 
 #### Runtime (modifiables par environnement)
 
@@ -383,9 +409,36 @@ public class ProjectResource {
 
 ### Récupérer l'utilisateur courant
 
-L'augmentor attache l'`UserEntity` complet en attribut de `SecurityIdentity`.
-Les noms d'attributs sont des constantes de `AuthAttributes` — préférez-les aux
-littéraux :
+Le plus simple est d'injecter `CurrentUser`, une vue typée de l'appelant de la
+requête :
+
+```java
+@Path("/api/me")
+@Authenticated
+public class MeResource {
+
+    @Inject CurrentUser currentUser;
+
+    @GET
+    public UserEntity me() {
+        return currentUser.require();          // 401 si aucun utilisateur
+    }
+}
+```
+
+| Méthode | Retour |
+|---------|--------|
+| `user()` | `Optional<UserEntity>` — vide pour une requête anonyme |
+| `require()` | l'`UserEntity`, ou `UnauthorizedException` (401) |
+| `id()` | `Optional<UUID>` |
+| `authSource()` | `Optional<String>` : `oidc`, `api-key` ou `service-api-key` |
+| `isService()` | `true` pour une clé de service |
+| `serviceName()` | `Optional<String>`, présent seulement pour une clé de service |
+| `hasRole(role)` | délègue à la `SecurityIdentity` |
+
+Sous le capot, l'augmentor attache l'`UserEntity` complet en attribut de
+`SecurityIdentity`. Pour y accéder directement, les noms d'attributs sont des
+constantes de `AuthAttributes` — préférez-les aux littéraux :
 
 ```java
 @Path("/api/me")
@@ -497,6 +550,52 @@ public interface ApiKeyStore {
 > Toute clé a un `userId`, y compris celles d'un service : il n'y a **qu'une**
 > forme de clé, donc aucun discriminant à respecter côté implémentation.
 
+#### Schéma SQL de référence (PostgreSQL)
+
+Les colonnes correspondent aux champs de `UserEntity` et `ApiKeyEntity`. Le jeton
+lui-même n'est **jamais** stocké : seul son `id` (le `jti` du JWT) l'est, ce qui
+suffit à vérifier la révocation et l'expiration.
+
+```sql
+CREATE TABLE users
+(
+    id          UUID PRIMARY KEY     DEFAULT gen_random_uuid(),
+    username    TEXT        NOT NULL UNIQUE,  -- unicité exigée par UserServiceImpl
+    name        TEXT,
+    email       TEXT,
+    role        TEXT,
+    oidc_id     TEXT UNIQUE,                  -- NULL pour un SERVICE
+    avatar_url  TEXT,
+    type        TEXT        NOT NULL DEFAULT 'HUMAN',   -- HUMAN | SERVICE
+    state       TEXT        NOT NULL DEFAULT 'ACTIVE',  -- ACTIVE | BLOCKED
+    created_by  UUID REFERENCES users (id) ON DELETE SET NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_login  TIMESTAMPTZ
+);
+
+CREATE TABLE api_keys
+(
+    id           UUID PRIMARY KEY,            -- = jti du JWT, fourni par ApiKeyService
+    user_id      UUID        NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    name         TEXT,
+    revoked      BOOLEAN     NOT NULL DEFAULT false,
+    revoked_at   TIMESTAMPTZ,
+    expires_at   TIMESTAMPTZ,
+    created_by   UUID REFERENCES users (id) ON DELETE SET NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_used_at TIMESTAMPTZ
+);
+CREATE INDEX api_keys_user_id_idx ON api_keys (user_id);
+```
+
+`UserService.deleteById` ne supprime que la ligne `users` : `ON DELETE CASCADE`
+sur `api_keys.user_id` est donc nécessaire pour que `DELETE /auth/users/{id}`
+aboutisse (les clés d'un utilisateur supprimé cessent de toute façon de
+fonctionner, leur propriétaire étant introuvable). `ON DELETE SET NULL` sur
+`created_by` évite qu'un admin ne puisse plus être supprimé parce qu'il a créé
+d'autres comptes ou clés. Pour conserver l'historique, préférez bannir
+(`POST /auth/users/{id}/ban`) plutôt que supprimer.
+
 ### Gestion des erreurs
 
 Les erreurs métier des services sont traduites en statuts HTTP par
@@ -572,6 +671,8 @@ Les services métier (`UserService`, `ApiKeyService`) peuvent également être r
 ## API REST exposée
 
 L'extension expose deux ressources REST sous le préfixe `/auth/`. Toutes les réponses sont JSON.
+Pour ne pas les servir, positionnez `norskel-auth-build.rest-enabled=false` : les
+services (`UserService`, `ApiKeyService`) et `CurrentUser` restent disponibles.
 
 ### `UserResource` — `/auth/users`
 

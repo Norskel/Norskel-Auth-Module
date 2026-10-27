@@ -22,4 +22,12 @@ public interface AuthBuildTimeConfig {
     /** JWT issuer for signed API tokens. */
     @WithDefault("norskel-auth")
     String apiTokenIssuer();
+
+    /**
+     * Whether the {@code /auth/users} and {@code /auth/api-keys} endpoints are served.
+     * Read at build time by {@code @EndpointDisabled} on the resources; set it to {@code false}
+     * when the host application exposes its own user and API-key endpoints over the services.
+     */
+    @WithDefault("true")
+    boolean restEnabled();
 }

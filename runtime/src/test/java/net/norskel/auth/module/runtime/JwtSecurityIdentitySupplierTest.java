@@ -2,6 +2,7 @@ package net.norskel.auth.module.runtime;
 
 import io.quarkus.security.AuthenticationFailedException;
 import io.quarkus.security.identity.SecurityIdentity;
+import net.norskel.auth.module.runtime.config.AuthRuntimeConfig;
 import net.norskel.auth.module.runtime.entities.UserEntity;
 import net.norskel.auth.module.runtime.enums.UserStateEnum;
 import net.norskel.auth.module.runtime.enums.UserTypeEnum;
@@ -11,6 +12,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Answers;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -38,6 +40,9 @@ class JwtSecurityIdentitySupplierTest {
 
     @Mock
     UserService userService;
+
+    @Mock(answer = Answers.RETURNS_DEEP_STUBS)
+    AuthRuntimeConfig config;
 
     @InjectMocks
     JwtSecurityIdentitySupplier supplier;
@@ -192,6 +197,29 @@ class JwtSecurityIdentitySupplierTest {
         assertEquals(AuthAttributes.SOURCE_API_KEY,
                 result.getAttribute(AuthAttributes.AUTH_SOURCE));
         assertNull(result.getAttribute(AuthAttributes.SERVICE_NAME));
+    }
+
+    @Test
+    void augment_grantsTheDefaultRole_whenAHumanOwnerHasNoRole() {
+        UUID tokenId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        when(jwt.getTokenID()).thenReturn(tokenId.toString());
+        when(apiKeyService.check(tokenId)).thenReturn(true);
+        when(jwt.getSubject()).thenReturn(userId.toString());
+        when(config.user().defaultRole()).thenReturn("user");
+
+        UserEntity human = new UserEntity();
+        human.setId(userId);
+        human.setUsername("alice");
+        human.setRole(null);
+        human.setType(UserTypeEnum.HUMAN);
+        human.setState(UserStateEnum.ACTIVE);
+        when(userService.findById(userId)).thenReturn(human);
+        stubIdentityForBuilder();
+
+        SecurityIdentity result = supplier.augment(identity);
+
+        assertEquals(Set.of("user"), result.getRoles());
     }
 
     @Test

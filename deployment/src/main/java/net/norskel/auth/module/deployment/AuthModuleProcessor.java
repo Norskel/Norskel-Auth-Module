@@ -6,6 +6,7 @@ import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.RunTimeConfigurationDefaultBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
+import net.norskel.auth.module.runtime.CurrentUser;
 import net.norskel.auth.module.runtime.JwtSecurityIdentitySupplier;
 import net.norskel.auth.module.runtime.OIDCSecurityIdentitySupplier;
 import net.norskel.auth.module.runtime.UserRoleAugmentor;
@@ -41,7 +42,8 @@ class AuthModuleProcessor {
                         UserRoleAugmentor.class,
                         OIDCSecurityIdentitySupplier.class,
                         JwtSecurityIdentitySupplier.class,
-                        ClaimRoleResolver.class)
+                        ClaimRoleResolver.class,
+                        CurrentUser.class)
                 .build();
     }
 

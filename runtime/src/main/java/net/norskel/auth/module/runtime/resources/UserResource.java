@@ -3,6 +3,7 @@ package net.norskel.auth.module.runtime.resources;
 import io.quarkus.security.Authenticated;
 import io.quarkus.security.UnauthorizedException;
 import io.quarkus.security.identity.SecurityIdentity;
+import io.quarkus.resteasy.reactive.server.EndpointDisabled;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
@@ -24,6 +25,7 @@ import java.util.UUID;
  * @author Norskel
  * @since 17.04.2026
  **/
+@EndpointDisabled(name = "norskel-auth-build.rest-enabled", stringValue = "false")
 @Path("/auth/users")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

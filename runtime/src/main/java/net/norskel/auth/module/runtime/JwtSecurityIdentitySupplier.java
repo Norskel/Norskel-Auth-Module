@@ -6,6 +6,7 @@ import io.quarkus.security.runtime.QuarkusSecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
+import net.norskel.auth.module.runtime.config.AuthRuntimeConfig;
 import net.norskel.auth.module.runtime.entities.UserEntity;
 import net.norskel.auth.module.runtime.enums.UserStateEnum;
 import net.norskel.auth.module.runtime.enums.UserTypeEnum;
@@ -33,6 +34,9 @@ public class JwtSecurityIdentitySupplier {
 
     @Inject
     UserService userService;
+
+    @Inject
+    AuthRuntimeConfig config;
 
     public SecurityIdentity augment(SecurityIdentity identity) {
         JsonWebToken jwt = (JsonWebToken) identity.getPrincipal();
@@ -109,6 +113,9 @@ public class JwtSecurityIdentitySupplier {
             // A service with no role would authenticate with no authority at all.
             log.warn("Rejected service key with no role serviceName={}", user.getUsername());
             throw new AuthenticationFailedException("Token not valid");
+        } else {
+            // Same fallback as the OIDC path: a person with no stored role gets the default one
+            builder.addRole(config.user().defaultRole());
         }
 
         return builder.build();
